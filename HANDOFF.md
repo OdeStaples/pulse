@@ -18,10 +18,12 @@ The user has no coding experience: explain steps in plain, short language.
 - The API has no resting-calorie figure; resting = total minus active (capped at 0).
 
 ## 3. In progress
-- The user is checking the calorie card by eye. Not yet seen in a browser: whether two-line weekday/date
-  labels fit at phone width, and how the arrows look. Chrome extension was not connected.
-- `HANDOFF.md` edits are uncommitted. Next: fix whatever the user reports, then open a pull request
-  `calorie-breakup` -> `main` (CONTRIBUTING.md: `main` is protected). Then ask what the sleep graph should change.
+- The calorie card was checked in the browser by the user and works: week arrows, totals, tooltip, and
+  stepping back to Week 33. (Claude never saw it; the Chrome extension was not connected.)
+- Open items, both from the user and not started: the optional workout split, and the real-data setup
+  (Google sign-in instead of demo mode, see `docs/setup.md`). Ask the user for details before starting either.
+- Also pending: open a pull request `calorie-breakup` -> `main` (CONTRIBUTING.md: `main` is protected), and
+  ask what the sleep graph should change.
 
 ## 4. How to run and test
 - `pnpm dev`, then http://localhost:3000 (demo sign-in; /strain for calories, /sleep for sleep). Health: /healthz
