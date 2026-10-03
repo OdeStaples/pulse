@@ -107,6 +107,7 @@ export default async function StrainPage({ searchParams }: PageProps<"/strain">)
             colorBy="single"
             stack={CALORIE_PARTS}
             headline="day"
+            weekNav
             ranges={WEEK_MONTH}
             defaultRange="w"
             data={{ value: calories, reason: null, provisional: false }}

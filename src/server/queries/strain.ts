@@ -94,7 +94,7 @@ export function getStrain(day: string, ctx: QueryCtx = defaultCtx()): StrainVM {
     zoneNote: zoneNote(row, ctx),
     activities: exs.filter((e) => e.day === day).map((e) => activityItem(e, row)),
     trend: { points: pts, target: target.value ? [target.value.low, target.value.high] : null },
-    calories: calorieSplit(rows, day, soFar),
+    calories: calorieSplit(rows, day, soFar, 182),
     workouts: { points: trendPoints(rows, day, (r) => workoutMin.get(r.day) ?? 0, 60, soFar) },
   };
 }

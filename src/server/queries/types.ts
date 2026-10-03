@@ -187,7 +187,7 @@ export type StrainVM = {
   zoneNote: string;
   activities: ActivityItem[];
   trend: Trend;
-  /** 30 days ending on the day: total kcal split into active and resting (resting = total − active, never below 0). */
+  /** 182 days ending on the day (the card steps back through them by week; W and M slice the end): total kcal split into active and resting (resting = total − active, never below 0). */
   calories: SplitPoint[];
   /** 60 days ending on the day: minutes of recorded workouts (0 on a day with data but none). */
   workouts: Trend;

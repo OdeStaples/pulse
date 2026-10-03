@@ -43,7 +43,7 @@ describe("getStrain calories and workouts", () => {
     const ctx = ctxFor(db);
     const today = getStrain(dayAt(179), ctx);
     expect(today.isToday).toBe(true);
-    expect(today.calories).toHaveLength(30);
+    expect(today.calories).toHaveLength(182);
     const last = today.calories.at(-1)!;
     expect(last).toMatchObject({ day: dayAt(179), provisional: true });
     const total = db.$client.prepare("select calories from daily_metrics where day = ?").pluck().get(dayAt(178)) as number;

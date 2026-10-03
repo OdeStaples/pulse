@@ -2,10 +2,12 @@
 
 import * as React from "react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
+import { addDays, differenceInCalendarWeeks, format as formatIso, getISOWeek, parseISO, startOfISOWeek } from "date-fns"
+import { ChevronLeft, ChevronRight } from "lucide-react"
 import { Bar, CartesianGrid, Cell, ComposedChart, LabelList, Line, ReferenceArea, ReferenceLine, XAxis, YAxis } from "recharts"
 import { cn } from "@/lib/utils"
 import { DATA_COLORS, deltaTone, recoveryColor, STRESS_COLOR, stressLevel, type GoodDirection } from "@/lib/bands"
-import { DAY, dayLabel, formatDay, formatValue, spoken, type FormatKey } from "@/lib/format"
+import { DAY, dayLabel, formatDay, formatValue, rangeLabel, spoken, type FormatKey } from "@/lib/format"
 import type { Metric } from "@/lib/reasons"
 import { parseRange, RANGE_DAYS, withParam, type TrendRange } from "@/lib/url"
 import { ChartTooltip, ChartTooltipContent } from "@/components/ui/chart"
@@ -58,6 +60,11 @@ export type TrendChartProps = {
   stack?: readonly TrendSeries[]
   /** `day`: the header shows the selected (last) day's value instead of the range average. */
   headline?: "average" | "day"
+  /**
+   * W view only: Monday-Sunday calendar weeks with previous / next arrows and a "Week 40" label, stepping back through
+   * `data` (the week is kept in `?wk=`, 0 = the week of the last day). Bars are labelled with weekday and date.
+   */
+  weekNav?: boolean
 }
 
 const RANGE_ARIA: Record<TrendRange, string> = { w: "1 week", m: "1 month", "6m": "6 months", "1y": "1 year" }
@@ -84,6 +91,17 @@ function colorFor(colorBy: TrendChartProps["colorBy"], v: number) {
   return DATA_COLORS["chart-5"].css
 }
 
+/** A week-mode axis label: the weekday over the date ("Mon" / "28"), two lines so seven fit a phone. */
+function weekdayTick({ x, y, payload }: { x?: number | string; y?: number | string; payload?: { value: string | number } }) {
+  if (!payload || x == null || y == null) return <g />
+  return (
+    <text x={x} y={y} textAnchor="middle" fill="var(--muted-foreground)" fontSize={12} className="recharts-cartesian-axis-tick-value">
+      <tspan x={x} dy="0.71em">{formatDay(String(payload.value), { weekday: "short" })}</tspan>
+      <tspan x={x} dy="1.25em" className="font-numeric tabular-nums">{formatDay(String(payload.value), { day: "numeric" })}</tspan>
+    </text>
+  )
+}
+
 function Trend({ points, p }: { points: TrendPoint[]; p: TrendChartProps }) {
   const router = useRouter()
   const pathname = usePathname()
@@ -103,7 +121,23 @@ function Trend({ points, p }: { points: TrendPoint[]; p: TrendChartProps }) {
     if (!p.fixedRange) setRange(urlRange)
   }
 
-  const rows = points.slice(-RANGE_DAYS[range]).map((pt) => ({
+  // Week stepping (W view with `weekNav`): Monday-Sunday weeks, `weekBack` weeks before the last day's week.
+  const weekMode = !!p.weekNav && range === "w"
+  const anchor = points.at(-1)?.date ?? today
+  // Stepping back stops at the earliest week that has a value, so a window padded with empty days adds no blank weeks.
+  const earliest = points.find((pt) => pt.value !== null)?.date
+  const maxBack = earliest ? Math.max(0, differenceInCalendarWeeks(parseISO(anchor), parseISO(earliest), { weekStartsOn: 1 })) : 0
+  const [back, setBack] = React.useState(() => Math.min(maxBack, Math.max(0, Number.parseInt(params.get("wk") ?? "0", 10) || 0)))
+  const weekBack = Math.min(back, maxBack)
+  const monday = addDays(startOfISOWeek(parseISO(anchor)), -7 * weekBack)
+  const windowPoints: TrendPoint[] = weekMode
+    ? Array.from({ length: 7 }, (_, i) => {
+        const date = formatIso(addDays(monday, i), "yyyy-MM-dd")
+        return points.find((pt) => pt.date === date) ?? { date, value: null }
+      })
+    : points.slice(-RANGE_DAYS[range])
+
+  const rows = windowPoints.map((pt) => ({
     ...pt,
     fill: pt.value === null ? undefined : colorFor(p.colorBy, pt.value),
     fillOpacity: pt.provisional ? 0.45 : 1,
@@ -122,7 +156,9 @@ function Trend({ points, p }: { points: TrendPoint[]; p: TrendChartProps }) {
   const scrubbed = active !== null ? rows[active] : null
   const byDay = p.headline === "day"
   // The day the header and legend describe: the scrubbed one, else the selected (last) day.
-  const shown = scrubbed ?? (byDay || p.stack ? (rows.at(-1) ?? null) : null)
+  // In week mode that is the week's last day up to the selected one (the current week's later days are still empty).
+  const lastRow = weekMode ? ([...rows].reverse().find((r) => r.date <= anchor) ?? rows.at(-1) ?? null) : (rows.at(-1) ?? null)
+  const shown = scrubbed ?? (byDay || p.stack ? lastRow : null)
   const line = !p.stack && (range === "6m" || range === "1y")
   // A single-hue 6M line (Pulse Age, VO2 max, vitals) fits its data; bars always start at zero.
   const domain: [number | "auto", number | "auto"] =
@@ -156,6 +192,13 @@ function Trend({ points, p }: { points: TrendPoint[]; p: TrendChartProps }) {
     setActive(null)
     router.replace(`${pathname}${withParam(params.toString(), "r", v === fallback ? null : v)}`, { scroll: false })
   }
+  const stepWeek = (to: number) => {
+    const next = Math.min(maxBack, Math.max(0, to))
+    setBack(next)
+    setActive(null)
+    router.replace(`${pathname}${withParam(params.toString(), "wk", next === 0 ? null : String(next))}`, { scroll: false })
+  }
+  const weekText = `Week ${getISOWeek(monday)}`
 
   return (
     <div className="min-w-0">
@@ -197,6 +240,33 @@ function Trend({ points, p }: { points: TrendPoint[]; p: TrendChartProps }) {
         )}
       </div>
 
+      {weekMode && (
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <button
+            type="button"
+            aria-label="Previous week"
+            disabled={weekBack >= maxBack}
+            onClick={() => stepWeek(weekBack + 1)}
+            className="grid size-10 place-items-center rounded-md text-muted-foreground transition-colors hover:text-foreground disabled:pointer-events-none disabled:opacity-30"
+          >
+            <ChevronLeft aria-hidden className="size-5" />
+          </button>
+          <p className="min-w-0 text-center text-xs leading-4 font-semibold text-foreground-secondary tabular-nums" aria-live="polite">
+            <span className="font-bold text-foreground">{weekText}</span>
+            <span className="ml-2 text-muted-foreground">{rangeLabel(rows[0].date, rows[6].date)}</span>
+          </p>
+          <button
+            type="button"
+            aria-label="Next week"
+            disabled={weekBack <= 0}
+            onClick={() => stepWeek(weekBack - 1)}
+            className="grid size-10 place-items-center rounded-md text-muted-foreground transition-colors hover:text-foreground disabled:pointer-events-none disabled:opacity-30"
+          >
+            <ChevronRight aria-hidden className="size-5" />
+          </button>
+        </div>
+      )}
+
       {values.length === 0 ? (
         <div className="grid h-[200px] place-items-center">
           <EmptyState body="No data in this range yet." />
@@ -211,7 +281,15 @@ function Trend({ points, p }: { points: TrendPoint[]; p: TrendChartProps }) {
             onMouseLeave={() => setActive(null)}
           >
             <CartesianGrid {...GRID} />
-            <XAxis dataKey="date" {...AXIS} ticks={ticks} tickFormatter={tickFormat} interval={range === "w" ? 0 : "preserveStartEnd"} minTickGap={8} />
+            <XAxis
+              dataKey="date"
+              {...AXIS}
+              ticks={ticks}
+              tickFormatter={tickFormat}
+              interval={range === "w" ? 0 : "preserveStartEnd"}
+              minTickGap={8}
+              {...(weekMode && { tick: weekdayTick, height: 44 })}
+            />
             <YAxis hide={!line} {...AXIS} width={axisWidth} tickCount={3} domain={domain} tickFormatter={(v: number) => formatValue(p.format, v)} />
             {p.baseline && (
               <ReferenceArea y1={p.baseline.mean - p.baseline.sd} y2={p.baseline.mean + p.baseline.sd} fill="var(--chart-band)" fillOpacity={1} ifOverflow="extendDomain" />
