@@ -2,11 +2,13 @@
 import Base from "../../layouts/Base.astro"
 import GetStarted from "../../components/GetStarted.astro"
 import { COMPARISONS } from "../../data/compare"
-import { breadcrumbs } from "../../lib/schema"
+import { breadcrumbs, collectionPage } from "../../lib/schema"
 
-const title = "Pulse compared: Fitbit Air, subscription wearables and Google Health Premium"
-const description = "Plain, dated comparisons for Fitbit Air owners: what the band does on its own, what Google Health Premium adds, how Pulse differs from a subscription recovery wearable."
+const title = "Compare wearables, recovery scores and Google Health"
+const description = "Dated comparisons of recovery and readiness scores across Fitbit Air, Google Health, WHOOP, Garmin, Amazfit and Oura, with what Pulse adds and what it does not."
+const keywords = [...new Set(COMPARISONS.flatMap((c) => c.keywords.slice(0, 2)))]
 const schema = [
+  collectionPage(Astro.site!, "/compare/", title, description, COMPARISONS.map(c => ({ name: c.h1, path: `/compare/${c.slug}/` }))),
   breadcrumbs(Astro.site!, [
     { name: "Pulse", path: "/" },
     { name: "Compare", path: "/compare/" },
@@ -14,10 +16,10 @@ const schema = [
 ]
 ---
 
-<Base title={title} description={description} schema={schema}>
+<Base title={title} description={description} schema={schema} keywords={keywords}>
   <header class="wrap head">
     <h1>Compare</h1>
-    <p class="lede">Straight answers for Fitbit Air owners weighing their options. Every fact about another product is dated and links to its source.</p>
+    <p class="lede">Straight answers for people comparing wearables, Google Health and their recovery scores. Every fact about another product is dated and links to its source.</p>
   </header>
   <ul class="wrap list">
     {

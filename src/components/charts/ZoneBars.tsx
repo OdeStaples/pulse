@@ -1,5 +1,6 @@
+import Link from "next/link"
 import { cn } from "@/lib/utils"
-import { DATA_COLORS, type DataColor } from "@/lib/bands"
+import { DATA_COLORS, ZONE_COLOR, type DataColor } from "@/lib/bands"
 import { durationWords, hmm } from "@/lib/format"
 import type { Metric } from "@/lib/reasons"
 import { Skeleton, SkeletonText } from "@/components/ui/skeleton"
@@ -7,8 +8,16 @@ import { EmptyState } from "@/components/shells/EmptyState"
 import { MetricState } from "@/components/shells/MetricState"
 import { LABEL } from "@/components/metrics/primitives"
 
-/** `zone` 1-4 orders the rows; `label` names it (Light, Moderate, Vigorous, Peak). */
-export type ZoneRow = { zone: number; label: string; min: number; max: number | null; seconds: number }
+/** `zone` 0-5 orders the rows (0 is time under Zone 1: `min` 0, `max` the bpm below Zone 1); `label` names it ("Zone 1"). */
+export type ZoneRow = {
+  zone: number
+  label: string
+  min: number
+  max: number | null
+  seconds: number
+  /** Activity only: the middle half of this zone's share (0-1) over the last 30 days of the same kind. */
+  typical?: { low: number; high: number }
+}
 export type StackedSegment = { key: string; label: string; count: number; color: DataColor }
 
 export type ZoneBarsProps =
@@ -18,6 +27,8 @@ export type ZoneBarsProps =
       data: Metric<ZoneRow[]> | null | undefined
       /** Where the zones came from, under the rows. */
       note?: string
+      /** A link after the note (activity-02's "View HR Settings"). */
+      noteLink?: { label: string; href: string }
       emptyCopy?: string
     }
   | {
@@ -28,49 +39,104 @@ export type ZoneBarsProps =
       emptyCopy?: string
     }
 
+
 function share(part: number, total: number) {
   if (!total || !part) return "0%"
   const p = (part / total) * 100
   return p < 1 ? "<1%" : `${Math.round(p)}%`
 }
 
-function Rows({ zones, note }: { zones: ZoneRow[]; note?: string }) {
+function Rows({ zones, note, noteLink }: { zones: ZoneRow[]; note?: string; noteLink?: { label: string; href: string } }) {
   const total = zones.reduce((a, z) => a + z.seconds, 0)
   const sorted = [...zones].sort((a, b) => b.zone - a.zone)
+  const typical = sorted.some((z) => z.typical)
+  // No time in any zone (an easy walk): one line that says so, not greyed rows of 0:00:00.
+  const lowest = sorted.findLast((z) => z.zone > 0)
+  if (!total && lowest)
+    return (
+      <div className="flex flex-1 flex-col justify-center">
+        <p className="rounded-lg bg-secondary px-3 py-3 text-[15px] leading-[22px] text-pretty text-foreground-secondary">
+          Heart rate stayed under the {lowest.label} zone ({lowest.min}{"\u00a0"}bpm) the whole time.
+        </p>
+        <Note note={note} link={noteLink} />
+      </div>
+    )
+  const T = Math.round(total)
   return (
     // In a stretched card (Strain's Time in zones beside two stacked cards) the rows share the spare height
     // evenly instead of leaving it under the last row (SYM5). In a natural-height parent nothing grows.
     <div className="flex flex-1 flex-col">
+      <div aria-hidden className="mb-2 flex items-baseline justify-between px-1">
+        <span className={cn(LABEL, "flex items-baseline gap-1.5 text-muted-foreground", !typical && "invisible")}>
+          <span className="size-2.5 self-center rounded-[2px] bg-(image:--pattern-hatch) ring-1 ring-border" />
+          Typical range
+        </span>
+        <span className={cn(LABEL, "flex items-baseline gap-2 text-muted-foreground")}>
+          Duration
+          <span className="font-numeric text-[15px] leading-5 font-bold text-foreground tabular-nums">
+            {hmm(Math.floor(T / 60))}
+            <span className="text-xs text-muted-foreground">:{String(T % 60).padStart(2, "0")}</span>
+          </span>
+        </span>
+      </div>
       <ul role="list" className="flex flex-1 flex-col gap-2">
         {sorted.map((z) => {
-          const range = z.max === null ? `${z.min}+\u00a0bpm` : `${z.min}-${z.max}\u00a0bpm`
+          const below = z.zone === 0
+          const range = below ? `<${z.max! + 1}\u00a0bpm` : z.max === null ? `${z.min}+\u00a0bpm` : `${z.min}-${z.max}\u00a0bpm`
+          const spoken = below ? `under ${z.max! + 1} bpm` : range.replace("-", " to ").replace("+", " and above")
           const sh = share(z.seconds, total)
           const t = Math.round(z.seconds)
           const minutes = Math.floor(t / 60)
+          const color = ZONE_COLOR[z.zone] ? DATA_COLORS[ZONE_COLOR[z.zone]] : null
           return (
             <li
               key={z.zone}
-              aria-label={`${z.label} zone, ${range.replace("-", " to ").replace("+", " and above")}, ${durationWords(minutes)}, ${sh === "<1%" ? "under 1 percent" : sh.replace("%", " percent")}`}
+              aria-label={`${z.label} zone, ${spoken}, ${durationWords(minutes)}, ${sh === "<1%" ? "under 1 percent" : sh.replace("%", " percent")}`}
               className={cn("flex flex-1 flex-col justify-center gap-2 rounded-lg bg-secondary px-3 py-2.5", !z.seconds && "opacity-40")}
             >
-              <div aria-hidden className="flex items-baseline gap-3">
-                <span className={LABEL}>{z.label}</span>
-                <span className={cn(LABEL, "font-numeric text-muted-foreground")}>{range}</span>
-                <span className={cn(LABEL, "font-numeric text-foreground-secondary")}>{sh}</span>
+              <div aria-hidden className="flex items-baseline gap-2">
+                <span className={cn(LABEL, "font-bold uppercase")}>{z.label}</span>
+                <span className={cn(LABEL, "font-numeric text-muted-foreground uppercase")}>{range}</span>
+                {/* The share in the zone's colour, 0% included; Zones 0 and 1 stay white (activity-02, activity-05). */}
+                <span className={cn(LABEL, "font-numeric tabular-nums", color && z.zone > 1 ? color.text : "text-foreground")}>{sh}</span>
                 <span className="ml-auto font-numeric text-lg leading-6 font-bold tabular-nums">
                   {hmm(minutes)}
                   <span className="text-xs text-muted-foreground">:{String(t % 60).padStart(2, "0")}</span>
                 </span>
               </div>
-              <div aria-hidden className="relative h-2 rounded-sm bg-(image:--pattern-hatch)">
-                <div className="absolute inset-y-0 left-0 rounded-sm bg-foreground" style={{ width: total ? `${(z.seconds / total) * 100}%` : 0 }} />
+              <div aria-hidden className="relative h-3 rounded-[2px] bg-(image:--pattern-hatch)">
+                <div className={cn("absolute inset-y-0 left-0 rounded-[2px]", color ? color.bg : "bg-foreground")} style={{ width: total ? `${(z.seconds / total) * 100}%` : 0 }} />
+                {/* Your typical range for this kind of activity: a lit band between two dashed ticks, over the bar. */}
+                {z.typical && (
+                  <div
+                    className="absolute -inset-y-0.5 border-x border-dashed border-foreground/80 bg-foreground/10"
+                    style={{ left: `${Math.min(100, z.typical.low * 100)}%`, width: `${Math.max(0, Math.min(100, z.typical.high * 100) - Math.min(100, z.typical.low * 100))}%` }}
+                  />
+                )}
               </div>
             </li>
           )
         })}
       </ul>
-      {note && <p className="mt-3 text-xs leading-4 font-medium text-muted-foreground">{note}</p>}
+      <Note note={note} link={noteLink} />
     </div>
+  )
+}
+
+function Note({ note, link }: { note?: string; link?: { label: string; href: string } }) {
+  if (!note) return null
+  return (
+    <p className="mt-3 text-xs leading-4 font-medium text-muted-foreground">
+      {note}
+      {link && (
+        <>
+          {" "}
+          <Link href={link.href} className="relative text-foreground-secondary underline underline-offset-2 after:absolute after:-inset-x-1 after:-inset-y-3.5 hover:text-foreground">
+            {link.label}
+          </Link>
+        </>
+      )}
+    </p>
   )
 }
 
@@ -111,7 +177,7 @@ export function ZoneBars(p: ZoneBarsProps) {
   if (p.variant === "rows")
     return (
       <MetricState metric={p.data} skeleton={<ZoneBarsSkeleton variant="rows" />} empty={empty}>
-        {(zones) => <Rows zones={zones} note={p.note} />}
+        {(zones) => <Rows zones={zones} note={p.note} noteLink={p.noteLink} />}
       </MetricState>
     )
   return (
@@ -126,14 +192,14 @@ export function ZoneBarsSkeleton({ variant }: { variant: "rows" | "stacked" }) {
     return (
       // Each zone row's own box: the real zone name, bars for range and time, the hatched track.
       <div aria-hidden className="space-y-2">
-        {["Peak", "Vigorous", "Moderate", "Light"].map((k) => (
+        {["Zone 5", "Zone 4", "Zone 3", "Zone 2", "Zone 1", "Zone 0"].map((k) => (
           <div key={k} className="space-y-2 rounded-lg bg-secondary px-3 py-2.5">
             <div className="flex items-center gap-3">
               <span className={LABEL}>{k}</span>
               <SkeletonText className={cn(LABEL, "w-20")} />
               <SkeletonText className="ml-auto w-[7ch] font-numeric text-lg leading-6 font-bold" />
             </div>
-            <div className="h-2 rounded-sm bg-(image:--pattern-hatch)" />
+            <div className="h-3 rounded-[2px] bg-(image:--pattern-hatch)" />
           </div>
         ))}
       </div>

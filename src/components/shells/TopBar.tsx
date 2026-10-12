@@ -1,7 +1,8 @@
 "use client"
 
+import Link from "next/link"
 import * as React from "react"
-import { FlaskConical } from "lucide-react"
+import { FlaskConical, ChevronRight } from "lucide-react"
 import { BandIcon } from "@/components/brand/BandIcon"
 import { useSyncing } from "@/lib/sync-activity"
 import { cn } from "@/lib/utils"
@@ -66,9 +67,9 @@ const SYNC_TRIGGER =
 
 /**
  * Sync freshness in the reference app's battery slot: "12m" or "Demo", the band icon and a status dot, opening
- * the sync popover. `icon` drops the text (rail); `line` is the sidebar footer's full sentence.
+ * the sync popover. The one place the app shows it (the nav's footer copy said the same and drifted by a minute).
  */
-export function SyncStatus({ variant = "header" }: { variant?: "header" | "icon" | "line" }) {
+export function SyncStatus() {
   const s = useShellStatus()
   const nowMs = useNow()
   const syncing = useSyncing() || s.sync.state === "syncing"
@@ -78,40 +79,30 @@ export function SyncStatus({ variant = "header" }: { variant?: "header" | "icon"
     <Popover>
       <PopoverTrigger
         aria-label={s.mode === "demo" ? `Demo data. ${v.label}` : v.label}
-        className={cn(
-          SYNC_TRIGGER,
-          variant === "line" ? "h-11 w-full gap-2.5 px-3 hover:bg-white/5" : variant === "icon" ? "size-11 justify-center" : "h-11 min-w-11 justify-end pr-0.5 pl-2"
-        )}
+        className={cn(SYNC_TRIGGER, "h-11 min-w-11 justify-end pr-0.5 pl-2")}
       >
-        {variant === "line" ? (
-          <>
-            <span aria-hidden className={cn("size-2 shrink-0 rounded-full", v.dot)} />
-            <span className="truncate text-xs leading-4 font-medium text-muted-foreground">{v.label}</span>
-          </>
-        ) : (
-          <>
-            {variant === "header" && (
-              // Reserves the text width before hydration fills in the relative age.
-              // Home's top row may hide it on narrow phones (`data-sync-text`); the band, its dot, the popover and the accessible name still carry it.
-              <span data-sync-text className="min-w-[3ch] text-right font-numeric text-[15px] leading-5 font-semibold text-muted-foreground tabular-nums">
-                {short}
-              </span>
-            )}
-            <Band dot={v.dot} syncing={syncing} />
-          </>
-        )}
+        {/* Reserves the text width before hydration fills in the relative age.
+            Home's top row may hide it on narrow phones (`data-sync-text`); the band, its dot, the popover and the accessible name still carry it. */}
+        <span data-sync-text className="min-w-[3ch] text-right font-numeric text-[15px] leading-5 font-semibold text-muted-foreground tabular-nums">
+          {short}
+        </span>
+        <Band dot={v.dot} syncing={syncing} />
       </PopoverTrigger>
       <PopoverContent
-        side={variant === "line" ? "top" : variant === "icon" ? "right" : "bottom"}
-        align={variant === "header" ? "end" : "start"}
+        side="bottom"
+        align="end"
         sideOffset={8}
         collisionPadding={12}
         // Focus stays on the trigger: moving it in would ring the first button on a mouse open.
         onOpenAutoFocus={(e) => e.preventDefault()}
         className="w-72 gap-0 p-0"
       >
-        <div className="flex items-center gap-3 p-4">
-          <span aria-hidden className="grid size-10 shrink-0 place-items-center rounded-xl bg-white/[0.06]">
+        {/* The source row opens Settings › Data source, where each data type's status (and any failure) is listed. */}
+        <Link
+          href="/settings?s=source"
+          className="flex items-center gap-3 rounded-t-[inherit] p-4 outline-none transition-[background-color] duration-150 ease-standard hover:bg-foreground/[0.04] focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:ring-inset"
+        >
+          <span aria-hidden className="grid size-10 shrink-0 place-items-center rounded-xl bg-foreground/[0.06]">
             <BandIcon className="size-5" strokeWidth={1.4} />
           </span>
           <div className="min-w-0">
@@ -121,10 +112,11 @@ export function SyncStatus({ variant = "header" }: { variant?: "header" | "icon"
               {v.line}
             </p>
           </div>
-        </div>
-        {s.mode === "demo" && <p className="-mt-2 px-4 pb-3 text-[13px] leading-[18px] text-muted-foreground">Generated data, refreshed every 15 minutes.</p>}
+          <ChevronRight aria-hidden className="ml-auto size-4 shrink-0 text-muted-foreground" strokeWidth={1.75} />
+        </Link>
+        {s.mode === "demo" && <p className="-mt-2 px-4 pb-3 text-[13px] leading-[18px] text-muted-foreground">Generated data, not from a device.</p>}
         {/* Settings is one tap away in the sidebar and in More; the popover only does the one thing. */}
-        <div className="border-t border-white/[0.06] p-3">
+        <div className="border-t border-foreground/[0.06] p-3">
           <SyncNowButton size="sm" className="w-full" />
         </div>
       </PopoverContent>
@@ -142,7 +134,7 @@ export function DemoChip() {
         <Badge
           variant="outline"
           tabIndex={0}
-          className="h-6 gap-1 rounded-full border-border px-2.5 text-[11px] font-bold tracking-[0.08em] text-foreground-secondary uppercase outline-none hover:bg-white/8 hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
+          className="h-6 gap-1 rounded-full border-border px-2.5 text-[11px] font-bold tracking-[0.1em] text-foreground-secondary uppercase outline-none hover:bg-foreground/8 hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
         >
           <FlaskConical aria-hidden strokeWidth={1.75} className="size-3!" />
           Demo data
@@ -160,7 +152,7 @@ export function DemoChip() {
 export function HeaderFrame({ children, className }: { children: React.ReactNode; className?: string }) {
   return (
     <header
-      className={cn("pointer-events-none sticky top-0 z-20 pt-[env(safe-area-inset-top)] *:pointer-events-auto", HEADER_FILL, HEADER_FADE, className)}
+      className={cn("pointer-events-none sticky top-0 z-20 pt-[var(--inset-top)] *:pointer-events-auto", HEADER_FILL, HEADER_FADE, className)}
     >
       {children}
     </header>

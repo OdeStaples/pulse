@@ -1,47 +1,28 @@
-import Link from "next/link"
 import { connection } from "next/server"
-import { Archive, BookOpen, CalendarDays, CalendarRange, ChartLine, ChevronRight, Database, ListChecks } from "lucide-react"
+import { Archive, BookOpen, CalendarDays, CalendarRange, ChartLine, Database, ListChecks, Palette, Plug, UserRound, BotMessageSquare } from "lucide-react"
 import { formatDay, rangeLabel } from "@/lib/format"
-import { currentSession } from "@/server/auth"
-import { avatarSrc } from "@/server/avatar"
-import { getDb } from "@/server/db"
+import { coachAccess } from "@/server/coach/store"
+import { userCtx } from "@/server/queries/common"
 import { getMore } from "@/server/queries/settings"
 import { LinkList, MORE_COLUMN, type LinkListRow } from "@/components/shells/LinkList"
 import { PageShell } from "@/components/shells/PageShell"
-import { CARD_LINK } from "@/components/shells/SectionShell"
-import { UserAvatar } from "@/components/shells/UserAvatar"
-import { cn } from "@/lib/utils"
 import { About } from "./About"
 import { SCORE_DOCS } from "./how-it-works/content"
 
 export const metadata = { title: "More" }
 
-/**
- * Phones have no sidebar, so More is the way to Settings there: the signed-in account as the first row (below
- * 768 px only; the rail and sidebar carry Settings from there).
- */
-async function AccountRow() {
-  const session = await currentSession()
-  const owner = session?.kind === "owner"
-  return (
-    <Link href="/settings" className={cn(CARD_LINK, "flex min-h-18 items-center gap-3 px-4 py-3 md:hidden")}>
-      <span className="size-11 shrink-0">
-        <UserAvatar src={avatarSrc(getDb())} />
-      </span>
-      <span className="min-w-0 flex-1">
-        <span className="block truncate text-[15px] leading-[22px] font-semibold">{owner ? session.email : "Demo"}</span>
-        <span className="block text-[13px] leading-[18px] text-muted-foreground">Account, data source, profile</span>
-      </span>
-      <span className="sr-only">Settings</span>
-      <ChevronRight aria-hidden className="size-5 shrink-0 text-muted-foreground" strokeWidth={1.75} />
-    </Link>
-  )
-}
-
 /** More `/more` (spec §7.14, U21): everything that isn't configuration. Settings stays Account, Data source, Profile. */
 export default async function MorePage() {
   await connection()
-  const vm = getMore()
+  const ctx = await userCtx()
+  const [vm, coach] = await Promise.all([getMore(ctx), coachAccess(ctx.db, ctx.userId)])
+  // Below 1280 px (where the sidebar lists Settings) each part of Settings is a row here, as the reference app's "Account & settings".
+  const settings: LinkListRow[] = [
+    { icon: UserRound, label: "Account", href: "/settings?s=account" },
+    { icon: Plug, label: "Data source", href: "/settings?s=source" },
+    { icon: Palette, label: "App", href: "/settings?s=app" },
+    ...(coach ? [{ icon: BotMessageSquare, label: "Coach", href: "/settings?s=coach" }] : []),
+  ]
   const reports: LinkListRow[] = [
     ...(vm.latestWeek
       ? [{ icon: CalendarRange, label: "Weekly report", aside: rangeLabel(vm.latestWeek.start, vm.latestWeek.end), href: `/reports/${vm.latestWeek.period}` }]
@@ -54,10 +35,10 @@ export default async function MorePage() {
 
   return (
     <PageShell title="More">
-      <AccountRow />
       {/* One 640 px column, as Settings: a list reads top to bottom, and side-by-side columns sharing grid rows
           left holes whenever one section was shorter (no reports yet). */}
       <div className={MORE_COLUMN}>
+        <LinkList title="Account & settings" rows={settings} className="xl:hidden" />
         <LinkList title="Reports" rows={reports} />
         <LinkList title="Trends" rows={[{ icon: ChartLine, label: "Trends", aside: "Up to 1 year", href: "/trends" }]} />
         <LinkList
@@ -65,7 +46,7 @@ export default async function MorePage() {
           rows={[{ icon: ListChecks, label: "Behaviours", aside: `${vm.behaviours.shown} of ${vm.behaviours.total} shown`, href: "/more/behaviours" }]}
         />
         <LinkList title="Help" rows={[{ icon: BookOpen, label: "How Pulse works", aside: `${SCORE_DOCS.length} scores`, href: "/more/how-it-works" }]} />
-        <LinkList title="Your data" rows={[{ icon: Database, label: "Export and backup", aside: "CSV, JSON, SQLite", href: "/more/data" }]} />
+        <LinkList title="Your data" rows={[{ icon: Database, label: "Export", aside: "CSV, JSON", href: "/more/data" }]} />
         <About version={vm.version} scoringVersion={vm.scoringVersion} />
       </div>
     </PageShell>

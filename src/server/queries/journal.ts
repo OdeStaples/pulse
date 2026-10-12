@@ -1,63 +1,62 @@
 import type { ImpactMetric, TagImpact } from "@/core/algorithms/journalImpact";
 import type { JournalImpactRow } from "../pipeline";
 import { addDays } from "../time";
-import { defaultCtx, finite, loadDays, meanSd, type QueryCtx, todayOf } from "./common";
+import { and, desc, eq, gte, isNotNull, lte } from "drizzle-orm";
+import { behavior, questionOf } from "@/lib/behaviors";
+import { dailyScores, journalEntries, journalNotes, journalTags } from "../db/schema";
+import { finite, loadDays, meanSd, type QueryCtx, todayOf } from "./common";
 import type { BehavioursVM, ImpactMetricKey, JournalInsightsVM, JournalTag, JournalVM } from "./types";
 
-const GROUP: Record<string, JournalTag["group"]> = {
-  alcohol: "evening",
-  late_caffeine: "evening",
-  late_meal: "evening",
-  screen_in_bed: "evening",
-  meditation: "recovery",
-  stretching: "recovery",
-  sauna: "recovery",
-  travel: "context",
-  illness: "context",
-};
 
 /** Every tag, hidden ones included, in check-in order (position inside a group, then insertion order). */
-function tagsOf(ctx: QueryCtx): JournalTag[] {
-  const rows = ctx.db.$client.prepare("select tag, label, is_default isDefault, hidden from journal_tags order by position, rowid").all() as {
-    tag: string;
-    label: string;
-    isDefault: number;
-    hidden: number;
-  }[];
-  return rows.map((r) => ({ tag: r.tag, label: r.label, isDefault: !!r.isDefault, hidden: !!r.hidden, group: GROUP[r.tag] ?? "custom" }));
+async function tagsOf(ctx: QueryCtx): Promise<JournalTag[]> {
+  const t = journalTags;
+  const rows = await ctx.db
+    .select({ tag: t.tag, label: t.label, isDefault: t.isDefault, hidden: t.hidden })
+    .from(t)
+    .where(eq(t.userId, ctx.userId))
+    .orderBy(t.position, t.seq);
+  return rows.map((r) => ({ tag: r.tag, label: r.label, question: questionOf(r.tag, r.label), section: behavior(r.tag)?.section ?? "custom", isDefault: r.isDefault, hidden: r.hidden }));
 }
 
-/** More › Behaviours: every tag, hidden ones included, with how many days answered it. */
-export function getBehaviours(ctx: QueryCtx = defaultCtx()): BehavioursVM {
-  const counts = new Map(
-    (ctx.db.$client.prepare("select tag, count(*) n from journal_entries group by tag").all() as { tag: string; n: number }[]).map((r) => [r.tag, r.n]),
-  );
-  return { tags: tagsOf(ctx).map((t) => ({ ...t, answers: counts.get(t.tag) ?? 0 })) };
+/** More › Behaviours and Select Behaviors: every tag, hidden ones included. */
+export async function getBehaviours(ctx: QueryCtx): Promise<BehavioursVM> {
+  return { tags: await tagsOf(ctx) };
 }
 
 function entriesBetween(ctx: QueryCtx, from: string, to: string) {
-  return ctx.db.$client.prepare("select day, tag, value from journal_entries where day >= ? and day <= ? order by day, tag").all(from, to) as {
-    day: string;
-    tag: string;
-    value: number;
-  }[];
+  const j = journalEntries;
+  return ctx.db
+    .select({ day: j.day, tag: j.tag, value: j.value, detail: j.detail })
+    .from(j)
+    .where(and(eq(j.userId, ctx.userId), gte(j.day, from), lte(j.day, to)))
+    .orderBy(j.day, j.tag);
 }
 
 /** The newest stored journal impact on or before today. */
-function latestImpact(ctx: QueryCtx): { asOf: string; impacts: TagImpact[] } | null {
-  const r = ctx.db.$client
-    .prepare("select day, journal_impact from daily_scores where day <= ? and journal_impact is not null order by day desc limit 1")
-    .get(todayOf(ctx)) as { day: string; journal_impact: string } | undefined;
-  return r ? { asOf: r.day, impacts: (JSON.parse(r.journal_impact) as JournalImpactRow).impacts } : null;
+async function latestImpact(ctx: QueryCtx): Promise<{ asOf: string; impacts: TagImpact[] } | null> {
+  const s = dailyScores;
+  const [r] = await ctx.db
+    .select({ day: s.day, impact: s.journalImpact })
+    .from(s)
+    .where(and(eq(s.userId, ctx.userId), lte(s.day, todayOf(ctx)), isNotNull(s.journalImpact)))
+    .orderBy(desc(s.day))
+    .limit(1);
+  return r ? { asOf: r.day, impacts: (r.impact as JournalImpactRow).impacts } : null;
 }
 
 /** Journal `/journal` for `day` (spec §7.11). */
-export function getJournal(day: string, ctx: QueryCtx = defaultCtx()): JournalVM {
+export async function getJournal(day: string, ctx: QueryCtx): Promise<JournalVM> {
   const today = todayOf(ctx);
   const stripStart = day < addDays(today, -29) ? day : addDays(today, -29);
-  const tags = tagsOf(ctx);
+  const n = journalNotes;
+  const [tags, entries, impact, [note]] = await Promise.all([
+    tagsOf(ctx),
+    entriesBetween(ctx, stripStart, today),
+    latestImpact(ctx),
+    ctx.db.select({ text: n.text }).from(n).where(and(eq(n.userId, ctx.userId), eq(n.day, day))),
+  ]);
   const label = new Map(tags.map((t) => [t.tag, t.label]));
-  const entries = entriesBetween(ctx, stripStart, today);
   const byDay = new Map<string, typeof entries>();
   for (const e of entries) byDay.set(e.day, [...(byDay.get(e.day) ?? []), e]);
 
@@ -66,7 +65,6 @@ export function getJournal(day: string, ctx: QueryCtx = defaultCtx()): JournalVM
   const mine = byDay.get(day) ?? [];
   const yesOf = (es: typeof entries) => es.filter((e) => e.value > 0).map((e) => ({ tag: e.tag, label: label.get(e.tag) ?? e.tag }));
 
-  const impact = latestImpact(ctx);
   const strongest = impact?.impacts.find((t) => t.effects.recovery.label === "positive" || t.effects.recovery.label === "negative");
   const teaser = strongest
     ? {
@@ -87,7 +85,13 @@ export function getJournal(day: string, ctx: QueryCtx = defaultCtx()): JournalVM
     strip,
     // Hidden behaviours leave the check-in sheet; their answers stay, still label History and still count in insights.
     tags: tags.filter((t) => !t.hidden),
-    checkIn: { done: mine.length > 0, entries: Object.fromEntries(mine.map((e) => [e.tag, e.value])), yes: yesOf(mine) },
+    checkIn: {
+      done: mine.length > 0,
+      entries: Object.fromEntries(mine.map((e) => [e.tag, e.value])),
+      details: Object.fromEntries(mine.flatMap((e) => (e.detail === null ? [] : [[e.tag, e.detail]]))),
+      note: note?.text ?? "",
+      yes: yesOf(mine),
+    },
     teaser,
     history,
   };
@@ -96,15 +100,14 @@ export function getJournal(day: string, ctx: QueryCtx = defaultCtx()): JournalVM
 const METRIC: Record<ImpactMetricKey, ImpactMetric> = { recovery: "recovery", hrv: "hrvZ", sleep: "sleepPerf" };
 
 /** Journal Insights `/journal/insights?m=` (spec §7.12): effects on next-day Recovery, HRV (SD) or sleep. */
-export function getJournalInsights(metric: ImpactMetricKey = "recovery", ctx: QueryCtx = defaultCtx()): JournalInsightsVM {
+export async function getJournalInsights(metric: ImpactMetricKey = "recovery", ctx: QueryCtx): Promise<JournalInsightsVM> {
   const key = METRIC[metric];
   const unit = metric === "hrv" ? "SD" : "%";
-  const impact = latestImpact(ctx);
+  const impact = await latestImpact(ctx);
   if (!impact) return { metric, unit, items: [], needsMore: [] };
-  const label = new Map(tagsOf(ctx).map((t) => [t.tag, t.label]));
   const from = addDays(impact.asOf, -90);
-  const entries = entriesBetween(ctx, from, addDays(impact.asOf, -1));
-  const rows = loadDays(ctx, addDays(from, 1), impact.asOf);
+  const [tags, entries, rows] = await Promise.all([tagsOf(ctx), entriesBetween(ctx, from, addDays(impact.asOf, -1)), loadDays(ctx, addDays(from, 1), impact.asOf)]);
+  const label = new Map(tags.map((t) => [t.tag, t.label]));
   const outcome = (day: string) => {
     const r = rows.get(day);
     return key === "recovery" ? r?.recovery?.value : key === "hrvZ" ? r?.recovery?.hrvZ : r?.sleep?.performance;

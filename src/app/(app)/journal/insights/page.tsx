@@ -1,6 +1,7 @@
 import { cn } from "@/lib/utils"
 import { CARD_MATERIAL } from "@/components/ui/card"
 import { Progress } from "@/components/ui/progress"
+import { userCtx } from "@/server/queries/common"
 import { getJournalInsights } from "@/server/queries/journal"
 import type { ImpactMetricKey, JournalInsightsVM } from "@/server/queries/types"
 import { DetailShell } from "@/components/shells/DetailShell"
@@ -18,7 +19,7 @@ const parseMetric = (raw: string | string[] | undefined): ImpactMetricKey => {
 /** Journal Insights `/journal/insights?m=` (spec §7.12, journey 7). */
 export default async function JournalInsightsPage({ searchParams }: PageProps<"/journal/insights">) {
   const metric = parseMetric((await searchParams).m)
-  const vm = getJournalInsights(metric)
+  const vm = await getJournalInsights(metric, await userCtx())
 
   return (
     <DetailShell
@@ -58,7 +59,7 @@ function Unlock({ id, needsMore, word, className }: { id: string; needsMore: Jou
   return (
     <section aria-labelledby={`${id}-title`} className={cn("space-y-3", className)}>
       <div className="space-y-1">
-        <h2 id={`${id}-title`} className="text-xs leading-4 font-bold tracking-[0.08em] uppercase">
+        <h2 id={`${id}-title`} className="text-xs leading-4 font-bold tracking-[0.1em] uppercase">
           Keep logging to unlock
         </h2>
         <p className="max-w-[65ch] text-[15px] leading-[22px] text-pretty text-muted-foreground">
@@ -71,7 +72,7 @@ function Unlock({ id, needsMore, word, className }: { id: string; needsMore: Jou
           return (
             <li key={n.key} className={cn(CARD_MATERIAL, "space-y-2.5 p-4")}>
               <div className="flex items-baseline justify-between gap-3">
-                <p className="min-w-0 truncate text-xs leading-4 font-bold tracking-[0.08em] uppercase">{n.label}</p>
+                <p className="min-w-0 truncate text-xs leading-4 font-bold tracking-[0.1em] uppercase">{n.label}</p>
                 <p className="shrink-0 font-numeric text-[13px] leading-4 font-semibold text-foreground-secondary tabular-nums">{have}/10</p>
               </div>
               <Progress value={(have / 10) * 100} aria-label={`${n.label}: ${have} of 10 days logged`} className="h-1.5 bg-muted" />

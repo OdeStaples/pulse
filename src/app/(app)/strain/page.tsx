@@ -1,52 +1,45 @@
 import { Flame } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { formatValue } from "@/lib/format"
-import { DATA_COLORS } from "@/lib/bands"
 import { reasonCopy } from "@/lib/reasons"
-import { dayHref } from "@/lib/url"
+import { activityHref, trendHref } from "@/lib/url"
 import { IntradayHrChart } from "@/components/charts/IntradayHrChart"
-import { TrendChart, type TrendSeries } from "@/components/charts/TrendChart"
 import { ZoneBars } from "@/components/charts/ZoneBars"
 import { ActivityCard } from "@/components/metrics/ActivityCard"
 import { InsightCard } from "@/components/metrics/InsightCard"
 import { KeyStatRow } from "@/components/metrics/KeyStatRow"
 import { ScoreDial } from "@/components/metrics/ScoreDial"
-import { DeltaMark, MetricTags } from "@/components/metrics/primitives"
+import { MetricTags } from "@/components/metrics/primitives"
 import { DetailShell } from "@/components/shells/DetailShell"
 import { EmptyState } from "@/components/shells/EmptyState"
 import { InfoButton } from "@/components/shells/InfoButton"
 import { SectionShell } from "@/components/shells/SectionShell"
 import { Card } from "@/components/ui/card"
 import { getStrain } from "@/server/queries/strain"
+import { getWeeklyTrends, type TrendViewKey } from "@/server/queries/trendView"
+import { WeeklyTrends } from "@/components/metrics/WeeklyTrends"
 import type { StrainVM } from "@/server/queries/types"
 import { pageDay, type SearchParams } from "../_lib/day"
-import { CALORIES_INFO, STRAIN_INFO, STRAIN_TARGET_INFO } from "../_lib/info"
-import { CAPTION, hrSeries, LABEL, LEGEND, statProps, trendProps } from "../_lib/view"
+import { STRAIN_INFO, STRAIN_TARGET_INFO } from "../_lib/info"
+import { CAPTION, hrSeries, LABEL, statProps, TodayVsLegend } from "../_lib/view"
 
 export const metadata = { title: "Strain", description: "Day Strain, your Strain Target, heart-rate zones, activities, calories burned and workout time." }
 
-/** Bottom first: resting under active, the day's base burn with movement on top. */
-const CALORIE_PARTS: readonly TrendSeries[] = [
-  { key: "resting", label: "Resting", color: DATA_COLORS["energy-resting"].css },
-  { key: "active", label: "Active", color: DATA_COLORS["energy-active"].css },
-]
-/** The new cards open on the week; the page's Strain trend keeps its month default. */
-const WEEK_MONTH = ["w", "m"] as const
+/** Weekly Trends in the reference app's order (strain-25..38). */
+const WEEKLY: readonly TrendViewKey[] = ["strain", "zones13", "zones45", "steps", "calories", "strength"]
 
 /** Strain `/strain?d=` (spec §7.3). */
 export default async function StrainPage({ searchParams }: PageProps<"/strain">) {
-  const { d, today, timeZone, weekly } = await pageDay(searchParams as SearchParams, "/strain")
-  const vm = getStrain(d)
+  const { d, today, timeZone, ctx } = await pageDay(searchParams as SearchParams, "/strain")
+  const [vm, weekly] = await Promise.all([getStrain(d, ctx), getWeeklyTrends(WEEKLY, d, ctx)])
   const s = vm.strain
   const t = vm.target.value
-  const trend = trendProps(vm.trend)
-  const calories = vm.calories.map((p) => ({ date: p.day, value: p.value, provisional: p.provisional, parts: p.parts }))
 
   return (
     <DetailShell
       title="Strain"
       info={STRAIN_INFO}
-      dateSwitcher={{ mode: "day", placement: "header" }}
+      dateSwitcher={{ mode: "day", placement: "header", steppers: false }}
       notch
       hero={
         <ScoreDial
@@ -63,19 +56,13 @@ export default async function StrainPage({ searchParams }: PageProps<"/strain">)
           <div className="divide-y divide-border">
             <TargetRow vm={vm} />
             {vm.summary.map((k) => (
-              <KeyStatRow key={k.key} variant="row" {...statProps(k)} />
+              <KeyStatRow key={k.key} variant="row" {...statProps(k, { d, today })} />
             ))}
           </div>
-          <p className={cn(LEGEND, "flex items-center gap-2")}>
-            <span className="inline-flex items-center gap-1">
-              <DeltaMark dir="up" tone="good" />
-              <DeltaMark dir="down" tone="bad" />
-            </span>
-            Today vs. prior 30 days
-          </p>
+          <TodayVsLegend period="prior 30 days" />
         </Card>
       }
-      insight={vm.coach && <InsightCard body={vm.coach} action={{ label: "Plan tonight’s sleep", href: dayHref("/sleep#planner", d, today) }} />}
+      insight={vm.coach && <InsightCard body={vm.coach} action={{ label: "Explore your strain insights", href: trendHref("strain", { d, today }) }} />}
       primary={
         <SectionShell variant="card" title="Heart rate" level={2}>
           <IntradayHrChart data={hrSeries(vm.hr, vm.maxHr)} />
@@ -89,34 +76,15 @@ export default async function StrainPage({ searchParams }: PageProps<"/strain">)
           {vm.activities.length ? (
             <div className="space-y-1.5">
               {vm.activities.map((a) => (
-                <ActivityCard key={a.id} name={a.name} kind={a.activityKind} strain={a.strain} start={a.start} end={a.end} distanceKm={a.distanceKm} paceS={a.paceS} href={`/activity/${a.id}`} timeZone={timeZone} />
+                <ActivityCard key={a.id} name={a.name} kind={a.activityKind} strain={a.strain} start={a.start} end={a.end} distanceKm={a.distanceKm} paceS={a.paceS} href={activityHref(a.id)} timeZone={timeZone} />
               ))}
             </div>
           ) : (
             <EmptyState body="No activities on this day." />
           )}
         </SectionShell>,
-        <SectionShell key="trend" variant="card" title={weekly ? "Weekly trends" : "Strain trend"} level={2}>
-          <TrendChart label="Strain" format="decimal1" colorBy="strain" {...trend} />
-        </SectionShell>,
-        <SectionShell key="calories" variant="card" title="Calories burned" info={CALORIES_INFO} level={2}>
-          <TrendChart
-            label="Calories burned"
-            unit="kcal"
-            format="grouped"
-            colorBy="single"
-            stack={CALORIE_PARTS}
-            headline="day"
-            weekNav
-            ranges={WEEK_MONTH}
-            defaultRange="w"
-            data={{ value: calories, reason: null, provisional: false }}
-          />
-        </SectionShell>,
-        <SectionShell key="workouts" variant="card" title="Workout duration" level={2}>
-          <TrendChart label="Workout duration" format="duration" colorBy="strain" ranges={WEEK_MONTH} defaultRange="w" {...trendProps(vm.workouts)} />
-        </SectionShell>,
       ]}
+      footer={<WeeklyTrends cards={weekly} d={d} today={today} />}
     />
   )
 }
@@ -133,7 +101,7 @@ function TargetRow({ vm }: { vm: StrainVM }) {
         <Flame strokeWidth={1.75} />
       </span>
       <span aria-hidden className="min-w-0 flex-1">
-        <span className={cn(LABEL, "block truncate")}>Strain Target</span>
+        <span className={cn(LABEL, "block text-balance")}>Strain Target</span>
         {reason && <span className={cn(CAPTION, "mt-0.5 block truncate")}>{reason}</span>}
         {t.value?.estimate && <MetricTags extra={["estimate"]} className="mt-1 justify-start" />}
       </span>
@@ -142,6 +110,8 @@ function TargetRow({ vm }: { vm: StrainVM }) {
       <span aria-hidden className="grid shrink-0 grid-cols-[auto_8px] gap-x-2">
         <span className={cn("font-numeric text-xl leading-6 font-bold tabular-nums", reason && "text-muted-foreground")}>{text}</span>
       </span>
+      {/* The rows below end on a chevron: keep its column so the values still line up. */}
+      <span aria-hidden className="size-4 shrink-0" />
     </div>
   )
 }

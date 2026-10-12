@@ -1,165 +1,186 @@
-# Setting up Pulse
+# Self-hosting Pulse with Tailscale
 
-Pulse runs on your own machine or server: one Next.js app with its sync worker, on SQLite. One instance
-serves one person. This guide takes you from a demo on your laptop to your own Fitbit Air data on a server
-you can open from your phone.
+Pulse runs on your own machine or server: one Next.js app with its sync worker, and a Postgres database beside it.
+People you invite create an account, connect their own Google account, and see only their own data (sign-up is
+invite-only by default; see [Invite people](admin.md#invite-people)). This guide takes you from a demo on your laptop to your Fitbit Air data on a home server that you open from
+your phone over [Tailscale](https://tailscale.com).
 
-```mermaid
-flowchart TB
-  demo[1. Demo on your laptop<br/>no Google account] --> google[2. Google Cloud project<br/>Health API, consent screen, OAuth client]
-  google --> local[3. Real data on localhost<br/>Sign in with Google, onboarding]
-  local --> server[4. Docker on a server<br/>data in a volume]
-  server --> https[5. HTTPS hostname<br/>tunnel or reverse proxy, OWNER_EMAIL]
-  https --> phone[Open it on your phone<br/>Install app]
-```
+For other ways to reach Pulse (Cloudflare Tunnel, a reverse proxy), see [other-setups.md](other-setups.md).
+Curious how it works under the hood? See [technical-details.md](technical-details.md).
 
 ## 1. Try the demo
 
-You need Node 24 and pnpm (`corepack enable` uses the version pinned in `package.json`).
+You need Node 24, pnpm (`corepack enable` uses the version pinned in `package.json`) and Docker.
 
 ```sh
 git clone https://github.com/adityaongit/pulse.git
 cd pulse
 pnpm install
-cp .env.example .env    # GOOGLE_OAUTH_ENABLED=false: demo mode
-pnpm dev                # open http://localhost:3000 and "Continue with demo data"
+cp .env.example .env                           # DATA_SOURCE=demo: demo mode
+docker compose -f compose.dev.yaml up -d       # Postgres on localhost:5432
+pnpm dev                                       # open http://localhost:3000 and "Continue with demo data"
 ```
 
-Demo mode writes 180 days of deterministic data into `data/demo.db`. Nothing leaves your machine.
+A demo instance generates 180 days of deterministic data for one shared demo user. Sign-up is off. Nothing leaves
+your machine.
 
-## 2. Google Cloud project
+## 2. Prepare the server
 
-Pulse reads your data through the [Google Health API](https://developers.google.com/health). The same OAuth
-client signs you in.
+You need a machine that stays on and that you can reach over SSH: a Raspberry Pi, a NAS, a home server or a cloud
+server. The commands below assume Debian or Ubuntu (`apt`).
 
-1. Create a project at <https://console.cloud.google.com> and enable the **Google Health API**.
-2. **Google Auth Platform › Branding / Audience**: user type **External**; add your app name, your email,
-   a home page and a privacy policy URL (any page of yours works for personal use).
-3. **Data access**: add `openid`, `.../auth/userinfo.email`, `.../auth/userinfo.profile`, and the Google Health
+1. Connect to the server over SSH.
+2. Update it and install Git, curl and nano:
+
+   ```sh
+   sudo apt update && sudo apt upgrade -y
+   sudo apt install -y git curl nano
+   ```
+
+3. Install Docker with Compose, and start it on every boot:
+
+   ```sh
+   curl -fsSL https://get.docker.com | sh
+   sudo systemctl enable --now docker
+   ```
+
+   You don't need to install Postgres yourself: Pulse's `compose.yaml` runs it in its own container.
+
+4. Clone Pulse and create your `.env`:
+
+   ```sh
+   git clone https://github.com/adityaongit/pulse.git
+   cd pulse
+   cp .env.example .env
+   ```
+
+## 3. Set up Tailscale
+
+Tailscale gives the server an HTTPS address that only your own devices can open, with no ports opened to the
+internet.
+
+1. Install Tailscale on the server and sign in:
+
+   ```sh
+   curl -fsSL https://tailscale.com/install.sh | sh
+   sudo tailscale up
+   ```
+
+   **Running in a Proxmox LXC container?** Tailscale needs access to `/dev/net/tun`. On the Proxmox host, add these
+   two lines to `/etc/pve/lxc/<container-id>.conf`, then restart the container:
+
+   ```
+   lxc.cgroup2.devices.allow: c 10:200 rwm
+   lxc.mount.entry: /dev/net/tun dev/net/tun none bind,create=file
+   ```
+
+2. In the [Tailscale admin console](https://login.tailscale.com/admin/dns), turn on **MagicDNS** and
+   **HTTPS Certificates**.
+3. Install the Tailscale app on your phone and sign in with the same Tailscale account.
+4. Note the server's address. It looks like `https://<machine>.<tailnet>.ts.net`; `tailscale status` and the admin
+   console both show it. The rest of this guide calls it `<your-host>`.
+
+## 4. Create the Google OAuth client
+
+Pulse reads your data through the Google Health API, so it needs an OAuth client in a Google Cloud project.
+
+1. Open the [Google Cloud Console](https://console.cloud.google.com/) and sign in with the Google account your
+   Fitbit uses.
+2. In the project picker at the top left, create a new project, for example "Pulse".
+3. Go to **APIs & Services › Enable APIs and Services**, search for **Google Health API**, open it and click
+   **Enable**.
+4. Set up the consent screen under **Google Auth Platform** (user type **External**, app name, your email). Under
+   **Data access**, add `openid`, `.../auth/userinfo.email`, `.../auth/userinfo.profile`, and the Google Health
    scopes listed in `SCOPES` in `src/server/sources/google/oauth.ts` (each prefixed with
    `https://www.googleapis.com/auth/googlehealth.`).
-4. **Audience**: set the publishing status to **In production**. In Testing, Google expires the grant every
-   7 days. You don't need Google's verification for your own account; the consent screen will warn that the
-   app is unverified, which is expected (**Advanced › Go to ...**).
-5. **Clients › Create client › Web application**. Under **Authorized redirect URIs** add one entry per
-   address you will open Pulse on, each ending in `/oauth/callback`:
-   - `http://localhost:3000/oauth/callback`
-   - `https://pulse.example.com/oauth/callback` (your HTTPS hostname from step 5)
+5. Under **Audience**, add yourself as a **test user**, again with the Google account your Fitbit uses.
+6. Go to **Credentials › Create Credentials › OAuth client ID**:
+   - **Application type**: Web application, with any name.
+   - **Authorized redirect URIs**: `https://<your-host>/oauth/callback`
+7. Click **Create** and copy the client ID and client secret for the next step.
 
-   Google accepts plain `http` only for localhost and never accepts a raw IP address such as
-   `192.168.1.10`. To use Pulse from your phone, give it an HTTPS hostname (step 5).
-6. Copy the client ID and secret.
+> While the app is in **Testing**, Google expires the grant every 7 days and you have to connect Google again.
+> Switch the audience to **In production** to avoid this. Google then shows an "unverified app" warning when you
+> connect, which you can click through for your own app.
 
-Google Health must be set up for the Google account you sign in with: the Fitbit Air must be paired in the
-Google Health app with that account (or your Fitbit account moved to it). Otherwise Pulse refuses the
-sign-in with "That Google account has no Google Health profile".
+## 5. Configure Pulse
 
-## 3. Real data on localhost
-
-In `.env`:
+Open the `.env` file in the `pulse` directory:
 
 ```sh
-GOOGLE_OAUTH_ENABLED=true
+nano .env
+```
+
+These are the values that matter for this setup. Leave the rest as they are, if you arent familiar with their meaning.
+
+```sh
+DATA_SOURCE=google                      # "demo" shows generated data; "google" uses your own
+POSTGRES_PASSWORD=...                   # the database password: openssl rand -base64 24
+BETTER_AUTH_SECRET=...                  # signs sessions: openssl rand -base64 32
+ADMIN_EMAILS=you@example.com            # the email you will sign up to Pulse with
 GOOGLE_CLIENT_ID=...apps.googleusercontent.com
 GOOGLE_CLIENT_SECRET=...
-OWNER_EMAIL=you@gmail.com     # the Google account your Fitbit Air uses
-TZ=Asia/Kolkata               # your IANA time zone
+APP_URL=https://<your-host>             # optional, recommended: the address you open Pulse on
 ```
 
-Restart `pnpm dev`, open <http://localhost:3000> and **Sign in with Google**. Allow every permission. Onboarding
-asks for your birth date and sex (Google doesn't share them); then the import of the last 180 days starts,
-and Settings shows its progress. Real data lives in `data/pulse.db`, apart from the demo.
+Generate each secret in a second terminal and paste it in. Save with **Ctrl+O** and exit with **Ctrl+X**.
 
-## 4. Run it with Docker
+Pulse doesn't publish a port on the host by default. Tailscale runs outside Docker, so publish one on loopback
+only. Create `compose.override.yaml` next to `compose.yaml`:
 
-The image builds the app and keeps the database in the `pulse-data` volume. [`compose.yaml`](../compose.yaml)
-publishes it on `127.0.0.1:3000` only, so just a tunnel or reverse proxy on the same machine can reach it:
-
-```sh
-docker compose up -d --build
-docker compose logs -f pulse    # "[worker] started (source: google)"
+```yaml
+services:
+  pulse:
+    ports:
+      - "127.0.0.1:3000:3000"
 ```
 
-Build the image on the server itself (or with `--platform` for its architecture): the SQLite driver is a
-native module.
+## 6. Start Pulse
 
-The image is about 100 MB. One person's instance uses about 100 MB of RAM when idle and about 150 MB
-while you browse, as `docker stats` reports it. The database grows by about 4 MB per month of data. The
-image sets `MALLOC_ARENA_MAX=2` and sizes the V8 heap at 50% of the container's memory limit
-(`NODE_OPTIONS` in the [`Dockerfile`](../Dockerfile)). `compose.yaml` sets that limit to 384 MB, so the
-heap gets 192 MB; a full recompute of three years of data needs under 64 MB. If you raise `mem_limit`,
-the heap grows with it.
+1. Build and start the containers:
 
-## 5. Put it on HTTPS
+   ```sh
+   sudo docker compose up -d --build
+   sudo docker compose logs -f pulse    # wait for "[worker] started (source: google)", then Ctrl+C
+   ```
 
-Pick one:
+2. Serve Pulse over HTTPS on your tailnet:
 
-| Option | Good for | Notes |
-|---|---|---|
-| [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) | Reaching it from anywhere, no open ports | Route `pulse.example.com` to `http://localhost:3000` (or the container). |
-| [Tailscale Serve](https://tailscale.com/kb/1312/serve) | Your devices only | `https://<machine>.<tailnet>.ts.net` works as a Google redirect URI. |
-| Caddy or nginx with Let's Encrypt | A server with a public IP | Forward `X-Forwarded-Proto` so the session cookie is marked Secure. |
+   ```sh
+   sudo tailscale serve --bg 3000
+   ```
 
-Then:
+3. Open `https://<your-host>` and **create your account right away**, with the email from `ADMIN_EMAILS`. While the
+   server has no accounts, that email needs no invite, and whoever signs up with it first owns the server.
+4. Go through onboarding, then **Connect Google** and allow every permission. Pulse imports your last 180 days.
 
-1. Add `https://<your-host>/oauth/callback` to the OAuth client (step 2.5).
-2. Set `OWNER_EMAIL` **before** the hostname is reachable. Without it, the first Google account to sign in
-   claims the instance.
-3. If the proxy rewrites the host, set `APP_URL=https://<your-host>` so the OAuth redirect uses it.
-4. Open the hostname on your phone, sign in, and use the browser's **Install app**.
+Your Pulse server is set up.
 
-## Environment reference
+## 7. Use it on your phone
 
-Every variable is listed in [`.env.example`](../.env.example); the server validates them at boot and exits
-with a list of what's wrong.
+With Tailscale connected on your phone, open `https://<your-host>` in your browser. Use **Add to Home Screen**
+(or **Install app**) to pin Pulse to your home screen like a normal app.
 
-| Variable | Required | Meaning |
-|---|---|---|
-| `GOOGLE_OAUTH_ENABLED` | no (false) | `false`: demo data; `true`: your Google Health data |
-| `TZ` | yes | Your IANA time zone; days are cut at your local midnight |
-| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | with Google | The OAuth client from step 2 |
-| `OWNER_EMAIL` | strongly recommended | The only Google account allowed in |
-| `APP_URL` | no | Pins the OAuth redirect host behind a proxy |
-| `DATABASE_PATH` | no | Defaults to `data/demo.db` or `data/pulse.db` |
-| `AVATAR_URL` | no | A default avatar photo; your Google photo or an upload wins |
+## Useful commands
 
-## Keeping it running
+| Command | What it does |
+|---|---|
+| `sudo docker ps` | Lists the running containers (`pulse` and `pulse-db`) |
+| `sudo docker logs pulse` | Shows Pulse's logs |
+| `sudo docker compose up -d --build` | Rebuilds and restarts Pulse after a `git pull` |
+| `scripts/deploy.sh` | Updates Pulse with a database dump and automatic rollback ([admin.md](admin.md#update-pulse)) |
 
-- **Update:** `git pull && docker compose up -d --build`. Migrations run at boot.
-- **Back up** the database with SQLite's online backup, never by copying the file while it runs (see below).
-- **Sign everyone out:** delete the row in the `instance` table; a new session secret is created on the next request.
-- **Disconnect Google:** Settings › Data source › Disconnect removes Pulse's access in your Google account too.
-
-## Backups
-
-Take online backups with SQLite's backup API, which is safe while Pulse writes in WAL mode. Run this daily
-from cron; it keeps 14 days:
-
-```sh
-#!/bin/sh
-set -eu
-umask 077
-dir=/var/backups/pulse
-mkdir -p "$dir" && chmod 700 "$dir"
-f="$dir/pulse-$(date +%F).db"
-# better-sqlite3 isn't hoisted in the standalone node_modules, hence the glob.
-docker exec pulse node -e "const D=require(require('fs').globSync('/app/node_modules/.pnpm/better-sqlite3@*/node_modules/better-sqlite3')[0]);new D('/app/data/pulse.db',{readonly:true}).backup('/tmp/backup.db').then(()=>process.exit(0),e=>{console.error(e);process.exit(1)})"
-docker cp pulse:/tmp/backup.db "$f" && docker exec pulse rm -f /tmp/backup.db
-chmod 600 "$f"
-ls -1t "$dir"/pulse-*.db | tail -n +15 | xargs -r rm -f
-```
-
-- Encrypt anything that leaves the machine, for example `age -r <your-age-pubkey> -o "$f.age" "$f"`. Never copy the plain `.db` offsite.
-- To restore: `docker compose stop pulse`, copy the backup over `pulse.db` in the volume, delete `pulse.db-wal` and `pulse.db-shm` beside it, then `docker compose start pulse`.
+For backups, password resets and inviting other people, see [admin.md](admin.md).
 
 ## Troubleshooting
 
 | Symptom | Fix |
 |---|---|
 | Google says `redirect_uri_mismatch` | The address you opened Pulse on has no matching redirect URI in the OAuth client. |
-| "This Pulse belongs to someone else" | You signed in with an account other than `OWNER_EMAIL` or the first one that claimed the instance. |
-| "No Google Health profile" | That Google account has no Fitbit data; sign in with the one in your Google Health app. |
-| Grant stops working after a week | The consent screen is still in Testing; set it to In production and sign in again. |
-| Server exits at boot with `Invalid configuration` | The message lists each bad variable. |
+| "No Google Health profile" | That Google account has no Fitbit data. Settings › Data source › **Switch Google account** and pick the one in your Google Health app. |
+| Grant stops working after a week | The consent screen is still in Testing; set it to In production and connect again. |
+| "Too many attempts" at sign-in | Sign-in allows 5 tries a minute per IP; wait a minute. |
+| Server exits at boot with `Invalid configuration` | The message lists each bad variable. `.env.example` explains every variable. |
+| Server exits at boot with a database error | Postgres isn't reachable; check `sudo docker compose ps` and `sudo docker compose logs db`. |
 
 Still stuck? Open an issue with the bug template (and no personal data).

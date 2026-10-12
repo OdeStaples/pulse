@@ -25,6 +25,19 @@ export const scopeUrl = (type: LogType) => `https://www.googleapis.com/auth/goog
 /** Types Google lets Pulse read back: the sync brings them home, so totals come from the sync, not this log. */
 export const READABLE: ReadonlySet<LogType> = new Set(["hydration-log", "nutrition-log", "weight", "body-fat"])
 
+/** Google's `dataSource.platform` values as people know them; anything else is shown title-cased. */
+const APPS: Record<string, string> = { FITBIT: "Fitbit", HEALTH_CONNECT: "Health Connect", GOOGLE_WEB_API: "Another app" }
+
+/** Where an entry was logged: Pulse, or the app Google names for it. */
+export function appLabel(source: string, app: string | null): string {
+  if (source === "pulse") return "Pulse"
+  if (!app) return "Another app"
+  return APPS[app] ?? app.charAt(0) + app.slice(1).toLowerCase().replaceAll("_", " ")
+}
+
+/** The sync brings other apps' entries home for this many local days (Journal lists them for those days only). */
+export const LOG_DAYS = 14
+
 /** Cycle tracking: never offered, shown or accepted on a male profile. */
 export const CYCLE: ReadonlySet<LogType> = new Set(["menstrual-period", "ovulation-test"])
 
@@ -50,6 +63,11 @@ export const KIND_LABEL: Record<LogKind, string> = {
   ovulation: "Ovulation test",
 }
 export const isCycleKind = (k: LogKind) => k === "period" || k === "ovulation"
+
+/** The coach's log tools (src/server/coach/logTools.ts), one per kind; each waits for the user's approval. */
+export const LOG_TOOLS = ["log_water", "log_food", "log_weight", "log_mood", "log_symptoms", "log_period", "log_ovulation"] as const
+export type LogToolName = (typeof LOG_TOOLS)[number]
+export const isLogTool = (name: string): name is LogToolName => (LOG_TOOLS as readonly string[]).includes(name)
 
 export const WATER_STEPS = [250, 500] as const
 

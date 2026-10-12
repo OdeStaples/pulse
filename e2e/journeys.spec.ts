@@ -1,7 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { days, withDay } from "./days";
 
-// Spec §8 journeys 1-8, in demo mode. Runs at 390 (phone) and 1440 (laptop); see playwright.config.ts.
 
 const url = (path: string) => new RegExp(`${path.replace(/[?.]/g, "\\$&")}$`);
 
@@ -12,16 +11,18 @@ async function scrollUntil(page: Page, done: () => Promise<boolean>) {
   }
 }
 
-test("1. morning check: Home → Recovery → drivers → back", async ({ page }) => {
+test("1. morning check: Home → Recovery → its Trend View → back", async ({ page }) => {
   const d = days().past!;
   await page.goto(withDay("/", d));
   await page.getByRole("link", { name: /^Recovery \d+ percent.*Open Recovery details$/ }).click();
   await expect(page).toHaveURL(url(withDay("/recovery", d)));
   await expect(page.getByRole("heading", { level: 1, name: "Recovery" })).toBeVisible();
-  await page.getByRole("link", { name: "See what shaped it" }).click();
-  const drivers = page.getByRole("region", { name: "What shaped it" });
-  await expect(drivers).toBeInViewport();
-  await expect(drivers.getByRole("listitem").first()).toContainText(/Recovery|effect/);
+  await page.getByRole("link", { name: "Explore your recovery insights" }).click();
+  await expect(page).toHaveURL(url(`/trend/recovery?d=${d}`));
+  await expect(page.getByRole("heading", { level: 1, name: "Trend view" })).toBeVisible();
+  await expect(page.getByText(/^Your average Recovery this month/)).toBeVisible();
+  await page.getByRole("link", { name: "Back" }).click();
+  await expect(page).toHaveURL(url(withDay("/recovery", d)));
   await page.getByRole("link", { name: "Back" }).click();
   await expect(page).toHaveURL(url(withDay("/", d)));
   await expect(page.getByRole("heading", { level: 1, name: "Home" })).toBeAttached();
@@ -29,9 +30,12 @@ test("1. morning check: Home → Recovery → drivers → back", async ({ page }
 
 test("2. browse the past: calendar panel → a past day → ?d= carries into Recovery, Strain, Sleep", async ({ page }) => {
   await page.goto("/");
-  await page.getByRole("button", { name: /Open calendar$/ }).click();
   const panel = page.getByRole("dialog");
-  await expect(panel).toBeVisible();
+  // On a fast production build the first click can land before hydration and do nothing: click until it opens.
+  await expect(async () => {
+    await page.getByRole("button", { name: /Open calendar$/ }).click();
+    await expect(panel).toBeVisible({ timeout: 1000 });
+  }).toPass({ timeout: 15_000 });
   await panel.getByRole("button", { name: "Previous month" }).click();
   // The 15th of last month: always seeded, always in the past.
   const now = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
@@ -61,7 +65,7 @@ test("3. workout review: Strain → activity → HR and zones", async ({ page })
   await expect(page).toHaveURL(/\/activity\/[^/]+$/);
   await expect(page.getByRole("heading", { level: 1, name: "Running" })).toBeVisible();
   await expect(page.getByRole("region", { name: "Heart rate" }).getByRole("figure")).toBeVisible();
-  await expect(page.getByRole("region", { name: "Time in zones" }).getByRole("listitem")).toHaveCount(5);
+  await expect(page.getByRole("region", { name: "Time in zones" }).getByRole("listitem")).toHaveCount(6);
   await page.getByRole("link", { name: "Back" }).click();
   await expect(page).toHaveURL(url(withDay("/strain", d)));
 });
@@ -79,16 +83,15 @@ test("4. bedtime plan: Home's Tonight's sleep → the Sleep planner", async ({ p
   for (const goal of ["Peak", "Perform", "Get by"]) await expect(planner.getByText(goal, { exact: true })).toBeVisible();
 });
 
-test("5. healthspan: Health → Healthspan → header collapses → contributor sheet", async ({ page }) => {
+test("5. healthspan: Health → Healthspan → header collapses → a factor opens in place → its Trend View", async ({ page }) => {
   await page.goto("/health");
-  await page.getByRole("link", { name: "Healthspan" }).click();
+  await page.getByRole("link", { name: "Go to Healthspan" }).click();
   await expect(page).toHaveURL(url("/health/healthspan"));
   await expect(page.getByRole("img", { name: /^Pulse Age/ }).first()).toBeVisible();
 
   const header = page.locator("main header[data-state]");
   await scrollUntil(page, async () => (await header.getAttribute("data-state")) === "collapsed");
   await expect(header).toHaveAttribute("data-state", "collapsed");
-  // The compact orb (between the two header stats) fades in once collapsed.
   const orb = header.locator("[data-collapse-row] > [aria-hidden] > div");
   await expect(orb).toContainText("Pulse Age");
   await expect.poll(() => orb.evaluate((el) => Number(getComputedStyle(el).opacity))).toBe(1);
@@ -96,12 +99,11 @@ test("5. healthspan: Health → Healthspan → header collapses → contributor 
 
   const vo2 = page.getByRole("button", { name: /^VO2 max/ });
   await vo2.click();
-  const sheet = page.getByRole("dialog");
-  await expect(sheet).toBeVisible();
-  await expect(sheet.getByRole("heading", { name: /VO2 max/ })).toBeVisible();
-  await page.keyboard.press("Escape");
-  await expect(sheet).toBeHidden();
-  await expect(vo2).toBeFocused();
+  await expect(vo2).toHaveAttribute("aria-expanded", "true");
+  const panel = page.getByRole("region", { name: /^VO2 max/ });
+  await expect(panel.getByText(/^(Outperforming|On track|Room to improve)$/)).toBeVisible();
+  await panel.getByRole("link", { name: "View trend" }).click();
+  await expect(page).toHaveURL(/\/trend\/vo2max$/);
 });
 
 test("6. illness week: Home alert → Health Monitor flags", async ({ page }) => {
@@ -112,20 +114,42 @@ test("6. illness week: Home alert → Health Monitor flags", async ({ page }) =>
   await expect(page).toHaveURL(url(withDay("/health/monitor", d)));
   await expect(page.getByRole("alert").filter({ hasText: "Possible illness signal" })).toBeVisible();
   const readings = page.getByRole("region", { name: "Last night’s readings" });
-  await expect(readings.getByRole("button", { name: /(Below|Above) / }).first()).toBeVisible();
+  const vital = readings.getByRole("link", { name: /(Below|Above) / }).first();
+  await expect(vital).toBeVisible();
+  await vital.click();
+  await expect(page).toHaveURL(new RegExp(`/metric/(hrv|rhr|resp|spo2|skin)\\?d=${d}$`));
+  // Back pops to the screen the metric was opened from (useAppBack), here Health Monitor, on the same day.
+  await page.getByRole("link", { name: "Back", exact: true }).click();
+  await expect(page).toHaveURL(url(withDay("/health/monitor", d)));
+});
+
+test("dashboard metrics open their own details and return to the selected Home day", async ({ page }) => {
+  const d = days().past!;
+  await page.goto(withDay("/", d));
+  // The default dashboard's rows with a metric screen of their own (spec §11 R41); the rest open Trend Views.
+  for (const [label, key] of [
+    ["Heart rate variability", "hrv"], ["Resting heart rate", "rhr"], ["Steps", "steps"],
+  ]) {
+    await page.getByRole("link", { name: new RegExp(`^${label}:? `) }).click();
+    await expect(page).toHaveURL(url(withDay(`/metric/${key}`, d)));
+    await expect(page.getByRole("heading", { level: 1, name: label })).toBeVisible();
+    await page.getByRole("link", { name: "Back", exact: true }).click();
+    await expect(page).toHaveURL(url(withDay("/", d)));
+  }
 });
 
 test("7. journal: check in with the round button or + → save → Insights shows the alcohol effect", async ({ page }) => {
   await page.goto("/");
-  // The round button on phone, the sidebar's "Check in" on laptop: the same link, one visible per width.
-  await page.getByRole("link", { name: "Check in for Today" }).filter({ visible: true }).click();
-  const sheet = page.getByRole("dialog", { name: "Check in" });
+  await page.getByRole("button", { name: "Check in for Today" }).filter({ visible: true }).click();
+  await expect(page).toHaveURL(url("/?checkin=1"));
+  const sheet = page.getByRole("dialog", { name: "Journal" });
   await expect(sheet).toBeVisible();
-  await sheet.getByRole("radiogroup", { name: "Alcohol" }).getByRole("radio", { name: "Yes" }).click();
-  await sheet.getByRole("radiogroup", { name: "Stretching" }).getByRole("radio", { name: "No" }).click();
-  await sheet.getByRole("button", { name: "Save check-in" }).click();
-  await expect(page.getByText("Check-in saved")).toBeVisible();
-  await expect(sheet).toBeHidden();
+  await sheet.getByRole("radiogroup", { name: "Had any alcohol?" }).getByRole("radio", { name: "Yes" }).click();
+  await sheet.getByRole("radiogroup", { name: "Stretched?" }).getByRole("radio", { name: "No" }).click();
+  await sheet.getByRole("button", { name: "Save journal" }).click();
+  await expect(page.getByText("Have a great day!")).toBeVisible();
+  await expect(page.getByRole("dialog")).toBeHidden();
+  await expect(page).toHaveURL(url("/"));
 
   await page.goto("/journal/insights");
   const alcohol = page.getByRole("button", { name: /^Alcohol lowered next-day Recovery/ });
@@ -153,18 +177,19 @@ test("9. More hub: Trends and a metric switch, a custom behaviour in the check-i
   await page.goto("/");
   await page.getByRole("navigation", { name: "Primary" }).filter({ visible: true }).first().getByRole("link", { name: "More" }).click();
   await expect(page).toHaveURL(url("/more"));
-  // Phones reach Settings from More's account row; the sidebar carries it from 768 px.
-  if (info.project.name === "390") await expect(page.getByRole("link", { name: /Settings$/ })).toBeVisible();
+  if (info.project.name === "390") await expect(page.getByRole("link", { name: /^Account/ })).toHaveAttribute("href", "/settings?s=account");
 
   await page.getByRole("link", { name: /^Trends/ }).click();
   await expect(page).toHaveURL(url("/trends"));
   await expect(page.getByRole("heading", { level: 2, name: "Recovery" })).toBeVisible();
-  await page.getByRole("navigation", { name: "Metric" }).getByRole("link", { name: "Heart rate variability" }).click();
+  await page.getByRole("button", { name: /Recovery & sleep/ }).click();
+  if (info.project.name === "390") await page.getByRole("button", { name: /^Vitals/ }).click();
+  await page.getByRole("link", { name: "Heart rate variability" }).click();
   await expect(page).toHaveURL(url("/trends?metric=hrv"));
   await expect(page.getByRole("heading", { level: 2, name: "Heart rate variability" })).toBeVisible();
   await page.getByRole("radio", { name: "1 year" }).click();
   await expect(page).toHaveURL(/\/trends\?metric=hrv&r=1y$/);
-  await expect(page.getByRole("navigation", { name: "Metric" }).getByRole("link", { name: "Heart rate variability" })).toHaveAttribute("aria-current", "page");
+  await expect(page.getByRole("button", { name: /Vitals/ })).toContainText("Heart rate variability");
 
   const name = `Plunge ${info.project.name} ${Date.now() % 1e6}`;
   await page.goto("/more");
@@ -172,11 +197,12 @@ test("9. More hub: Trends and a metric switch, a custom behaviour in the check-i
   await expect(page).toHaveURL(url("/more/behaviours"));
   await page.getByLabel("Add a behaviour").fill(name);
   await page.getByRole("button", { name: "Add behaviour", exact: true }).click();
-  await expect(page.getByRole("switch", { name: `Show ${name} in the check-in` })).toBeChecked();
+  await expect(page.getByRole("checkbox", { name: new RegExp(`^${name}`) })).toBeChecked();
   await page.goto("/journal?checkin=1");
-  const sheet = page.getByRole("dialog", { name: "Check in" });
-  await expect(sheet.getByRole("radiogroup", { name })).toBeVisible();
+  const sheet = page.getByRole("dialog", { name: "Journal" });
+  await expect(sheet.getByRole("radiogroup", { name: `${name}?` })).toBeVisible();
   await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "Yes, dismiss journal" }).click();
 
   await page.goto("/more/data");
   const download = page.waitForEvent("download");
@@ -201,4 +227,22 @@ test("Home header: dials, then scroll, then the ring row under a fixed top row",
   await page.goto("/");
   await scrollUntil(page, async () => (await panel.getAttribute("data-state")) === "rings");
   await expect(page.getByRole("img", { name: /-day streak$/ })).toBeInViewport();
+});
+
+test("10. My Day's +: the action menu → Add activity explains, Complete your journal opens the check-in", async ({ page }) => {
+  await page.goto("/");
+  const plus = page.getByRole("button", { name: "Add to today" });
+  await plus.click();
+  const menu = page.getByRole("menu");
+  // Only entries Pulse has data for; Start activity, Strength trainer and Share live stay off (src/lib/features.ts).
+  await expect(menu.getByRole("menuitem")).toHaveText([/Add activity/i, /Complete your journal/i]);
+  await menu.getByRole("menuitem", { name: /Add activity/i }).click();
+  const info = page.getByRole("dialog", { name: "Add an activity" });
+  await expect(info).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(info).toBeHidden();
+  await plus.click();
+  await page.getByRole("menu").getByRole("menuitem", { name: /Complete your journal/i }).click();
+  await expect(page).toHaveURL(url("/?checkin=1"));
+  await expect(page.getByRole("dialog", { name: "Journal" })).toBeVisible();
 });

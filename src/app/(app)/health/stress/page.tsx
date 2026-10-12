@@ -10,6 +10,7 @@ import { DetailShell } from "@/components/shells/DetailShell"
 import { EmptyState } from "@/components/shells/EmptyState"
 import { MetricState } from "@/components/shells/MetricState"
 import { SectionShell } from "@/components/shells/SectionShell"
+import { stressSeries } from "../../_lib/view"
 import { Skeleton } from "@/components/ui/skeleton"
 import { pageDay, type SearchParams } from "../../_lib/day"
 
@@ -41,12 +42,11 @@ const INFO = {
 }
 
 const LEVEL_KEYS = [
-  { key: "lowMin", word: "Low", bar: "bg-stress-low", text: "text-stress-low" },
-  { key: "mediumMin", word: "Medium", bar: "bg-stress-medium", text: "text-stress-medium" },
-  { key: "highMin", word: "High", bar: "bg-stress-high", text: "text-stress-high" },
+  { key: "lowMin", word: "Low", bar: "bg-stress-low", text: "text-stress-low-text" },
+  { key: "mediumMin", word: "Medium", bar: "bg-stress-medium", text: "text-stress-medium-text" },
+  { key: "highMin", word: "High", bar: "bg-stress-high", text: "text-stress-high-text" },
 ] as const
 
-/** One three-segment bar, each level as wide as its share of the day's scored minutes. */
 function LevelBar({ m, className }: { m: { lowMin: number; mediumMin: number; highMin: number }; className: string }) {
   return (
     <div aria-hidden className={cn("flex gap-0.5 overflow-hidden rounded-sm", className)}>
@@ -55,16 +55,12 @@ function LevelBar({ m, className }: { m: { lowMin: number; mediumMin: number; hi
   )
 }
 
-/**
- * the reference app's "Total day" [latest-stress-monitor-1]: the day's minutes per level over the typical same weekday
- * (dimmed), then the three durations in their level colours.
- */
 function TotalDay({ l, day }: { l: NonNullable<StressVM["levels"]["value"]>; day: string }) {
   const total = l.lowMin + l.mediumMin + l.highMin
   if (!total) return <EmptyState body={EMPTY} />
   return (
     <div className="space-y-4">
-      <p className="text-xs leading-4 font-bold tracking-[0.08em] uppercase">
+      <p className="text-xs leading-4 font-bold tracking-[0.1em] uppercase">
         {day} stress{l.typical && <span className="text-muted-foreground"> vs. typical {l.weekday}</span>}
       </p>
       <div className="space-y-1.5">
@@ -77,7 +73,7 @@ function TotalDay({ l, day }: { l: NonNullable<StressVM["levels"]["value"]>; day
             <p aria-hidden className={cn("font-numeric text-xl leading-6 font-bold tabular-nums", k.text)}>
               {hmm(l[k.key])}
             </p>
-            <p aria-hidden className="mt-1 text-xs leading-4 font-bold tracking-[0.08em] uppercase">
+            <p aria-hidden className="mt-1 text-xs leading-4 font-bold tracking-[0.1em] uppercase">
               {k.word}
             </p>
             {l.typical && (
@@ -100,10 +96,9 @@ function typicalLine(l: NonNullable<StressVM["levels"]["value"]>) {
   return `vs. your typical ${l.weekday}: ${delta}`
 }
 
-/** Stress Monitor `/health/stress?d=` (spec §7.9). */
 export default async function StressPage({ searchParams }: PageProps<"/health/stress">) {
-  const { d, today, timeZone } = await pageDay(searchParams as SearchParams, "/health/stress")
-  const vm = getStress(d)
+  const { d, today, timeZone, ctx } = await pageDay(searchParams as SearchParams, "/health/stress")
+  const vm = await getStress(d, ctx)
   const g = vm.gauge
 
   return (
@@ -126,31 +121,17 @@ export default async function StressPage({ searchParams }: PageProps<"/health/st
       }
       insight={vm.insight && <InsightCard body={vm.insight} />}
       primary={
-        <SectionShell variant="card" title={vm.isToday ? "Today" : dayLabel(d, today)}>
-          <StressChart
-            variant="full"
-            data={
-              vm.chart.value
-                ? {
-                    ...vm.chart,
-                    value: {
-                      points: vm.chart.value.points.map((p) => ({ t: p.t, value: p.v })),
-                      spans: vm.chart.value.spans.map((s) => ({ ...s, kind: s.kind === "nap" ? "sleep" : s.kind })),
-                      now: vm.chart.value.now ?? undefined,
-                    },
-                  }
-                : { ...vm.chart, value: null }
-            }
-          />
+        <SectionShell variant="card" title={vm.isToday ? "Today" : dayLabel(d, today)} info={{ title: "Stress throughout the day", body: "Body activation during still minutes, from 0 to 3. Movement, workouts and sleep appear as excluded periods rather than stress scores." }}>
+          <StressChart variant="full" data={stressSeries(vm.chart)} />
         </SectionShell>
       }
       secondary={[
-        <SectionShell key="levels" variant="card" title="Total day">
+        <SectionShell key="levels" variant="card" title="Total day" info={{ title: "Time at each stress level", body: "Scored still minutes split into low, medium and high activation. When available, the faded bar compares the same weekday in your recent history." }}>
           <MetricState metric={vm.levels} skeleton={<Skeleton className="h-24 w-full" />} renderReason={() => <EmptyState body={EMPTY} />}>
             {(l) => <TotalDay l={l} day={vm.isToday ? "Today" : dayLabel(d, today)} />}
           </MetricState>
         </SectionShell>,
-        <SectionShell key="trend" variant="card" title="30-day trend">
+        <SectionShell key="trend" variant="card" title="30-day trend" info={{ title: "Daily stress trend", body: "Average activation across each day's scored still minutes over the last 30 days. Days without enough data remain gaps." }}>
           <TrendChart
             label="Stress"
             data={{ value: vm.trend.points.map((p) => ({ date: p.day, value: p.value })), reason: null, provisional: false }}

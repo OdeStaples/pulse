@@ -23,8 +23,6 @@ next-env.d.ts
 
 # health data
 /data/
-*.db
-*.db-*
 
 # raw design captures
 docs/design/reference/raw/
@@ -51,3 +49,8 @@ npm-debug.log*
 /site/node_modules/
 /site/dist/
 /site/.astro/
+/backups/
+/build-scripts/
+
+# This machine's compose additions (scripts/deploy.sh loads it when present)
+compose.override.yaml

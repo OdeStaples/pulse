@@ -1,6 +1,7 @@
 import { CircleAlert } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { reasonCopy } from "@/lib/reasons"
+import { dayHref, metricHref } from "@/lib/url"
 import { getMonitor } from "@/server/queries/health"
 import type { MonitorVM } from "@/server/queries/types"
 import { StatusChip } from "@/components/metrics/primitives"
@@ -29,17 +30,11 @@ const INFO = {
 
 const CHIP = {
   within: { tone: "optimal", text: () => "Within range" },
-  // One phrasing with Home's monitor card: "N/5 within range" for the count, "Out of range" for the status (SYM).
-  // The illness alert below the count names the illness signal.
   out: { tone: "warning", text: () => "Out of range" },
   illness: { tone: "alert", text: () => "Out of range" },
 } as const
 
-/**
- * Weight and body fat, then blood glucose and core temperature once ever recorded: each the latest reading with its
- * date, against the mean of the readings in the 30 days before it (docs/research/heart-rhythm-ui.md, placement).
- */
-function Measurements({ rows }: { rows: MonitorVM["measurements"] }) {
+function Measurements({ rows, at }: { rows: MonitorVM["measurements"]; at: (href: string) => string }) {
   return (
     <Card className="gap-0 px-4 py-1 ring-0">
       <div className="divide-y divide-border">
@@ -57,6 +52,7 @@ function Measurements({ rows }: { rows: MonitorVM["measurements"] }) {
             averageLabel="prior 30-day average"
             sd={m.sd}
             direction="neutral"
+            href={at(metricHref(m.key))}
           />
         ))}
       </div>
@@ -80,7 +76,7 @@ function Count({ count }: { count: MonitorVM["count"] }) {
         {v ? v.inRange : "--"}
         <span className="text-[0.55em] text-foreground-secondary">/{v?.total ?? 5}</span>
       </p>
-      <p aria-hidden className="text-xs leading-4 font-bold tracking-[0.08em] uppercase">
+      <p aria-hidden className="text-xs leading-4 font-bold tracking-[0.1em] uppercase">
         Metrics within range
       </p>
       {chip && <StatusChip tone={chip.tone}>{chip.text()}</StatusChip>}
@@ -89,10 +85,9 @@ function Count({ count }: { count: MonitorVM["count"] }) {
   )
 }
 
-/** Health Monitor `/health/monitor?d=` (spec §7.8). */
 export default async function MonitorPage({ searchParams }: PageProps<"/health/monitor">) {
-  const { d } = await pageDay(searchParams as SearchParams, "/health/monitor")
-  const vm = getMonitor(d)
+  const { d, today, ctx } = await pageDay(searchParams as SearchParams, "/health/monitor")
+  const vm = await getMonitor(d, ctx)
 
   return (
     <DetailShell
@@ -102,7 +97,7 @@ export default async function MonitorPage({ searchParams }: PageProps<"/health/m
       hero={<Count count={vm.count} />}
       summary={
         vm.illness && (
-          <Alert role="alert" className="rounded-2xl border-0 bg-linear-to-b from-card-top to-card px-4 py-3 shadow-card ring-1 ring-recovery-red/60 *:[svg]:size-5 *:[svg]:translate-y-px">
+          <Alert role="alert" className="rounded-2xl border-0 bg-linear-to-b from-card-top to-card px-4 py-3 shadow-card ring-1 ring-recovery-red/60 *:[svg]:size-5! *:[svg]:translate-y-px">
             <CircleAlert aria-hidden className="text-recovery-red-text" strokeWidth={1.75} />
             <AlertTitle className="text-base leading-[22px] font-semibold">Possible illness signal</AlertTitle>
             <AlertDescription className="text-[15px] leading-[22px] text-pretty text-foreground-secondary">
@@ -114,17 +109,16 @@ export default async function MonitorPage({ searchParams }: PageProps<"/health/m
       }
       primary={
         <SectionShell variant="section" title="Last night’s readings">
-          <VitalTiles vitals={vm.vitals} />
+          <VitalTiles vitals={vm.vitals} day={d} today={today} />
         </SectionShell>
       }
       footer={
-        // the reference app's order below the vitals: heart rhythm (Heart Screener's place), then body measurements (spec §11 HM1).
         <div className="grid grid-cols-1 items-start gap-8 xl:grid-cols-2 xl:gap-6">
           <SectionShell variant="section" title="Heart rhythm">
             <HeartRhythm rhythm={vm.heartRhythm} />
           </SectionShell>
           <SectionShell variant="section" title="Measurements">
-            <Measurements rows={vm.measurements} />
+            <Measurements rows={vm.measurements} at={(href) => dayHref(href, d, today)} />
           </SectionShell>
         </div>
       }

@@ -5,6 +5,7 @@
 // code only (see oauth.ts), never a token or a body.
 import { createHash } from "node:crypto";
 import { gzipSync } from "node:zlib";
+import { and, eq, lt } from "drizzle-orm";
 import type { Db } from "../../db";
 import { rawPayloads } from "../../db/schema";
 import { addDays, localDay, localMidnight, wall } from "../../time";
@@ -64,34 +65,37 @@ export function buildFilter(type: DataTypeId, member: FilterMember, w: TimeWindo
             return `${day}T${time}`;
           })
         : [w.start, w.end].map((s) => new Date(s * 1000).toISOString());
+  // "Only filtering by start time is supported for ECG", and only with >= (dataPoints.list reference).
+  if (type === "electrocardiogram") return `${field} >= "${lo}"`;
   return `${field} >= "${lo}" AND ${field} < "${hi}"`;
 }
 
 // --- Raw archive --------------------------------------------------------------------------------
 
 /**
- * Stores a page gzipped, keyed by (type, range, sha256 of the body). Re-storing an unchanged page is a no-op.
- * Returns true when a row was inserted.
+ * Stores a page gzipped, keyed by (user, type, range, sha256 of the body). Re-storing an unchanged page is a
+ * no-op. Returns true when a row was inserted.
  */
-export function archivePage(
+export async function archivePage(
   db: Db,
+  userId: number,
   p: { type: string; rangeStart: number; rangeEnd: number; body: string; fetchedAt: number },
-): boolean {
+): Promise<boolean> {
   const bodyHash = createHash("sha256").update(p.body).digest("hex");
-  return (
-    db
-      .insert(rawPayloads)
-      .values({
-        type: p.type,
-        rangeStart: p.rangeStart,
-        rangeEnd: p.rangeEnd,
-        bodyHash,
-        gzBody: gzipSync(p.body),
-        fetchedAt: p.fetchedAt,
-      })
-      .onConflictDoNothing()
-      .run().changes > 0
-  );
+  const ins = await db
+    .insert(rawPayloads)
+    .values({
+      userId,
+      type: p.type,
+      rangeStart: p.rangeStart,
+      rangeEnd: p.rangeEnd,
+      bodyHash,
+      gzBody: gzipSync(p.body),
+      fetchedAt: p.fetchedAt,
+    })
+    .onConflictDoNothing()
+    .returning({ id: rawPayloads.id });
+  return ins.length > 0;
 }
 
 // --- Paired devices -----------------------------------------------------------------------------
@@ -115,36 +119,49 @@ export function parsePairedDevices(body: string): DeviceCheck {
 
 /**
  * Raw pages are evidence for schema drift and the input for re-mapping recent data, not a backup:
- * 30 days covers the 3-day re-fetch overlap many times over and any recent mapper fix, and bounds
- * the table at roughly a month of fetches. Freed pages are reused by later inserts; the WAL is
- * checkpointed by SQLite's default auto-checkpoint, so no VACUUM is needed.
+ * 7 days covers the 3-day re-fetch overlap and a recent mapper fix, and bounds the table at a week of fetches
+ * (at 30 it was half the database). Autovacuum reclaims the space for later inserts.
  */
-export const RAW_RETENTION_DAYS = 30;
+export const RAW_RETENTION_DAYS = 7;
 
-/** Deletes archived pages fetched more than RAW_RETENTION_DAYS before `nowS` (unix seconds). Returns the count. */
-export const pruneRawPayloads = (db: Db, nowS: number): number =>
-  db.$client.prepare("DELETE FROM raw_payloads WHERE fetched_at < ?").run(nowS - RAW_RETENTION_DAYS * 86_400).changes;
+/** Intraday types are not archived: a day of heart rate is ~8 pages, the bulk of the archive, and their samples are kept as-is. */
+const UNARCHIVED = new Set<string>(["heart-rate", "steps"]);
+
+/** Deletes the user's archived pages fetched more than RAW_RETENTION_DAYS before `nowS` (unix seconds). Returns the count. */
+export async function pruneRawPayloads(db: Db, userId: number, nowS: number): Promise<number> {
+  const gone = await db
+    .delete(rawPayloads)
+    .where(and(eq(rawPayloads.userId, userId), lt(rawPayloads.fetchedAt, nowS - RAW_RETENTION_DAYS * 86_400)))
+    .returning({ id: rawPayloads.id });
+  return gone.length;
+}
 
 // --- Client -------------------------------------------------------------------------------------
 
 export type ClientDeps = {
   db: Db;
+  /** Whose grant the requests use and whose archive the pages land in. */
+  userId: number;
   google: { clientId: string; clientSecret: string };
   timeZone: string;
   fetch?: typeof fetch;
   sleep?: (ms: number) => Promise<void>;
   /** Milliseconds. */
   now?: () => number;
+  /** Attempts per request for 429, 5xx and network failures. 1: fail fast, no waiting (the live heart-rate pull). */
+  maxTries?: number;
 };
 
 /** Create one per sync run: the 4 req/s limiter lives in the instance. */
 export function createGoogleClient({
   db,
+  userId,
   google,
   timeZone: tz,
   fetch: fetchFn = fetch,
   sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
   now = Date.now,
+  maxTries = MAX_TRIES,
 }: ClientDeps) {
   let nextSlot = 0;
   async function throttle() {
@@ -166,7 +183,7 @@ export function createGoogleClient({
     let refreshed = false;
     let force = false; // set for the one attempt right after a 401
     for (;;) {
-      const token = await getAccessToken(db, google, { fetch: fetchFn, now, force });
+      const token = await getAccessToken(db, userId, google, { fetch: fetchFn, now, force });
       force = false;
       await throttle();
       let res: Response;
@@ -180,7 +197,7 @@ export function createGoogleClient({
         // Inside the try: a body cut off mid-read is a network failure too.
         if (res.ok) return await res.text();
       } catch {
-        if (once || ++tries >= MAX_TRIES) throw new GoogleError("network", undefined, where);
+        if (once || ++tries >= maxTries) throw new GoogleError("network", undefined, where);
         await sleep(BACKOFF_MS * 2 ** (tries - 1));
         continue;
       }
@@ -188,13 +205,13 @@ export function createGoogleClient({
       if (status === 401) {
         await res.body?.cancel();
         if (refreshed) {
-          markRevoked(db, now());
+          await markRevoked(db, userId, now());
           throw new GoogleError("auth_revoked", status, where);
         }
         refreshed = force = true;
         continue;
       }
-      if ((status === 429 || (status >= 500 && !once)) && ++tries < MAX_TRIES) {
+      if ((status === 429 || (status >= 500 && !once)) && ++tries < maxTries) {
         const after = status === 429 ? retryAfterMs(res.headers.get("retry-after")) : undefined;
         if (after !== undefined && after > MAX_WAIT_MS) throw new GoogleError(errorCode(parseJson(await res.text())) ?? "http_429", status, where);
         await res.body?.cancel();
@@ -229,39 +246,46 @@ export function createGoogleClient({
     return { done: done === true, response: typeof response === "object" && response !== null ? (response as Record<string, unknown>) : undefined };
   }
 
+  /**
+   * Every data point of `type` in [from, to), one page at a time to `onPage`, split into local-day windows of at most
+   * the type's `maxDays`, every page archived (except intraday types). A page is dropped once `onPage` returns, so a
+   * caller that keeps only what it maps holds one page of raw points (5,000) at most.
+   */
+  async function listEach(type: DataTypeId, from: number, to: number, onPage: (points: unknown[]) => void): Promise<void> {
+    const t: DataType = DATA_TYPES[type];
+    if (!t.member) throw new GoogleError("unsupported_action", undefined, `${type} list`);
+    for (const w of localWindows(from, to, t.maxDays, tz)) {
+      const filter = buildFilter(type, t.member, w, tz);
+      // The archive range is the window's whole local days, so a re-fetch of a partial day keeps
+      // the same key and an unchanged body dedupes. Exact times are inside the body.
+      const range = { rangeStart: localMidnight(localDay(w.start, tz), tz), rangeEnd: ceilMidnight(w.end, tz) };
+      let pageToken: string | undefined;
+      let pages = 0;
+      do {
+        if (++pages > MAX_PAGES) throw new GoogleError("too_many_pages", undefined, type);
+        const q = new URLSearchParams({ filter, pageSize: String(t.pageSize), ...(pageToken && { pageToken }) });
+        const body = await request(`${API}/${type}/dataPoints?${q}`, type);
+        // Before parsing: a changed shape is kept as evidence.
+        if (!UNARCHIVED.has(type)) await archivePage(db, userId, { type, ...range, body, fetchedAt: fetchedAt() });
+        const page = readPage(body, "dataPoints", type);
+        onPage(page.points);
+        pageToken = page.next;
+      } while (pageToken);
+    }
+  }
+
   return {
     /** Whether the account has a paired device (`users.pairedDevices.list`, one page). Not archived: it is not health data. */
     async pairedDevices(): Promise<DeviceCheck> {
       return parsePairedDevices(await request(`${DEVICES_API}?pageSize=1`, "pairedDevices"));
     },
 
+    listEach,
 
-    /**
-     * Every data point of `type` in [from, to), split into local-day windows of at most the type's
-     * `maxDays`, every page archived. Points come back in API order. Memory holds the whole range, so
-     * a caller walking dense types (heart-rate) passes a day or so at a time.
-     */
+    /** Every data point of `type` in [from, to), in API order. Memory holds the whole range; dense types use `listEach`. */
     async list(type: DataTypeId, from: number, to: number): Promise<unknown[]> {
-      const t: DataType = DATA_TYPES[type];
-      if (!t.member) throw new GoogleError("unsupported_action", undefined, `${type} list`);
       const out: unknown[] = [];
-      for (const w of localWindows(from, to, t.maxDays, tz)) {
-        const filter = buildFilter(type, t.member, w, tz);
-        // The archive range is the window's whole local days, so a re-fetch of a partial day keeps
-        // the same key and an unchanged body dedupes. Exact times are inside the body.
-        const range = { rangeStart: localMidnight(localDay(w.start, tz), tz), rangeEnd: ceilMidnight(w.end, tz) };
-        let pageToken: string | undefined;
-        let pages = 0;
-        do {
-          if (++pages > MAX_PAGES) throw new GoogleError("too_many_pages", undefined, type);
-          const q = new URLSearchParams({ filter, pageSize: String(t.pageSize), ...(pageToken && { pageToken }) });
-          const body = await request(`${API}/${type}/dataPoints?${q}`, type);
-          archivePage(db, { type, ...range, body, fetchedAt: fetchedAt() }); // before parsing: a changed shape is kept as evidence
-          const page = readPage(body, "dataPoints", type);
-          out.push(...page.points);
-          pageToken = page.next;
-        } while (pageToken);
-      }
+      await listEach(type, from, to, (points) => void out.push(...points));
       return out;
     },
 
@@ -288,6 +312,21 @@ export function createGoogleClient({
     },
 
     /**
+     * Whether Google still has a data point (`dataPoints.get`, which the write-only scopes allow too). Only a 404 is
+     * "no"; any other error throws. The body is health data and is neither kept nor logged.
+     */
+    async exists(type: string, name: string): Promise<boolean> {
+      const id = encodeURIComponent(name.slice(name.lastIndexOf("/") + 1));
+      try {
+        await request(`${API}/${type}/dataPoints/${id}`, `${type} get`);
+        return true;
+      } catch (err) {
+        if (err instanceof GoogleError && err.status === 404) return false;
+        throw err;
+      }
+    },
+
+    /**
      * `rollupDataPoints` for civil days [fromDay, toDay) (exclusive end), in ranges of at most the
      * type's `maxDays` (and ROLLUP_MAX_DAYS). One POST per range: rollups do not paginate. Days with no data are omitted.
      */
@@ -300,7 +339,7 @@ export function createGoogleClient({
         const end = addDays(day, step) < toDay ? addDays(day, step) : toDay;
         const req = JSON.stringify({ range: { start: civilDate(day), end: civilDate(end) } });
         const body = await request(`${API}/${type}/dataPoints:dailyRollUp`, `${type} dailyRollUp`, req);
-        archivePage(db, {
+        await archivePage(db, userId, {
           type,
           rangeStart: localMidnight(day, tz),
           rangeEnd: localMidnight(end, tz),

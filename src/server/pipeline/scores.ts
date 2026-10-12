@@ -46,7 +46,7 @@ export type Cached = { s1: Stage1Day; activities: Stage1Activity[]; sessionRhr: 
 /** What stage 2 reads once, besides `Data`. */
 export type Inputs = {
   cached: Map<string, Cached>;
-  /** Per-minute series, read one day at a time (only the day being scored is ever asked for). */
+  /** Per-minute series, loaded a batch of days at a time by stage 2 (only the day being scored is ever asked for). */
   stillHr: Pick<Map<string, (number | null)[]>, "get">;
   loadSeries: Pick<Map<string, (number | null)[]>, "get">;
   segments: Map<string, Segment[]>;
@@ -494,9 +494,9 @@ export function scoreHealthspan(data: Data, f: Fold, d: Day, sleep: SleepRow, op
     day,
     sleepHours: main ? main.asleepMin / 60 : null,
     sri: sleep.sri,
-    // Google's all-day time in zones: Light + Moderate, Vigorous + Peak. Pulse's own time-in-zone only without it.
-    zone13Min: dm?.lightModerateMin ?? (worn ? (s1.zoneSeconds[0] + s1.zoneSeconds[1]) / 60 : null),
-    zone45Min: dm?.vigorousPeakMin ?? (worn ? (s1.zoneSeconds[2] + s1.zoneSeconds[3]) / 60 : null),
+    // Time in Pulse's own zones (heart-rate reserve, as Strain and the zone charts count them): zones 1-3, zones 4-5.
+    zone13Min: worn ? (s1.zoneSeconds[0] + s1.zoneSeconds[1] + s1.zoneSeconds[2]) / 60 : null,
+    zone45Min: worn ? (s1.zoneSeconds[3] + s1.zoneSeconds[4]) / 60 : null,
     strengthMin: worn ? strengthMin : null,
     steps: dm?.steps ?? null,
     vo2maxRun: dm?.vo2maxRun ?? null,

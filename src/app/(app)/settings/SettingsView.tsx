@@ -1,4 +1,3 @@
-import Link from "next/link"
 import { Check, ChevronDown, CircleAlert, Minus, TriangleAlert } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { ago, DAY, formatDay } from "@/lib/format"
@@ -11,7 +10,9 @@ import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
 import { GoogleFit } from "@/components/brand/GoogleFit"
 import { Mark } from "@/components/brand/Mark"
-import { AvatarButtons, DisconnectButton, EditProfileButton } from "./SettingsClient"
+import { AppSettings, SignOutForm } from "./AppSettings"
+import { AvatarButtons, ChangePasswordButton, DeleteAccountButton, DisconnectButton, EditProfileButton, SwitchGoogleButton, ThemePicker } from "./SettingsClient"
+import { SettingsLayout, type SettingsSection } from "./SettingsLayout"
 import { CAPTION } from "@/components/metrics/primitives"
 
 const BODY = "max-w-[65ch] text-[15px] leading-[22px] text-pretty text-foreground-secondary"
@@ -20,13 +21,29 @@ const ROW = "flex min-h-13 items-center justify-between gap-3 py-2"
 const ROW_LABEL = "text-[15px] leading-[22px]"
 const ROW_VALUE = "truncate text-right text-[15px] leading-[22px] text-foreground-secondary tabular-nums"
 /** The logo tile beside a row's name (account photo, data source mark). */
-const TILE = "grid size-11 shrink-0 place-items-center overflow-hidden rounded-xl bg-white/[0.06]"
+const TILE = "grid size-11 shrink-0 place-items-center overflow-hidden rounded-xl bg-foreground/[0.06]"
 
-export type SettingsAccount = { email: string | null; avatar: string | null; customPhoto: boolean }
+export type SettingsAccount = {
+  email: string | null
+  name?: string | null
+  username?: string | null
+  /** The shared demo user: no password to change, nothing of its own to delete. */
+  demo?: boolean
+  avatar: string | null
+  customPhoto: boolean
+  googleEmail?: string | null
+  /** An admin of this server: the account card links to the admin panel. */
+  admin?: boolean
+}
 
-/** Who is signed in: photo, account, change photo, sign out (U20). Sign out is a plain form post, so it works before hydration. */
+/**
+ * Who is signed in (name, @username, email) and what they can do about it: photo, password, sign out, delete the
+ * account. Sign out is a plain form post, so it works before hydration.
+ */
 export function Account({ account }: { account: SettingsAccount }) {
-  const owner = account.email !== null
+  const own = !account.demo && account.email !== null
+  const title = account.name || (account.username ? `@${account.username}` : account.email)
+  const line = [account.username && `@${account.username}`, account.email].filter((v) => v && v !== title).join(" · ")
   return (
     <SectionShell variant="card" level={2} id="account" title="Account">
       <div className="flex min-h-11 items-center gap-3">
@@ -34,17 +51,23 @@ export function Account({ account }: { account: SettingsAccount }) {
           <UserAvatar src={account.avatar} />
         </span>
         <div className="min-w-0 flex-1">
-          <p className="truncate text-[15px] leading-[22px] font-semibold">{owner ? account.email : "Demo"}</p>
-          <p className="text-[13px] leading-[18px] text-muted-foreground">{owner ? "Google account" : "Signed in to the demo"}</p>
+          <p className="truncate text-[15px] leading-[22px] font-semibold">{own ? title : "Demo"}</p>
+          <p className="truncate text-[13px] leading-[18px] text-muted-foreground">{own ? line : "Signed in to the demo"}</p>
         </div>
       </div>
       <div className="mt-4 grid grid-cols-2 gap-2">
-        {owner && <AvatarButtons customPhoto={account.customPhoto} />}
-        <form method="post" action="/logout" className={cn(!owner && "col-span-2")}>
+        {own && <AvatarButtons />}
+        {own && <ChangePasswordButton />}
+        {account.admin && (
+          <Button asChild variant="secondary" size="touch" className="col-span-2 w-full">
+            <a href="/admin">Admin panel</a>
+          </Button>
+        )}
+        <SignOutForm className="col-span-2">
           <Button type="submit" variant="outline" size="touch" className="w-full">
             Sign out
           </Button>
-        </form>
+        </SignOutForm>
       </div>
     </SectionShell>
   )
@@ -54,18 +77,18 @@ export function Account({ account }: { account: SettingsAccount }) {
 const SOURCE: Record<SettingsVM["source"]["status"], { line?: string; tone?: string; body?: string }> = {
   demo: {
     line: "180 days of generated data",
-    body: "Every screen runs on realistic generated data. Set GOOGLE_OAUTH_ENABLED=true on the server to use your Fitbit data.",
+    body: "Every screen runs on realistic generated data. Set DATA_SOURCE=google on the server to use your Fitbit data.",
   },
   not_connected: { line: "Not connected", body: "Connect the Google account your Fitbit Air syncs to. Pulse reads your data and writes only what you log in Pulse." },
   not_linked: {
     line: "No Google Health profile",
-    tone: "text-warning",
-    body: "This Google account has no Google Health profile, so there is no Fitbit data to read. Set up Google Health with this account (or move your Fitbit account to it), or disconnect and sign in with the account your Fitbit Air uses.",
+    tone: "text-warning-text",
+    body: "This Google account has no Google Health profile, so there is no Fitbit data to read. Set up Google Health with this account (or move your Fitbit account to it), or switch to the account your Fitbit Air uses.",
   },
   no_device: {
     line: "No Fitbit device",
-    tone: "text-warning",
-    body: "This Google account has Google Health but no Fitbit device, so there is nothing to import. Pair your Fitbit Air in the Google Health app and sync again, or disconnect and sign in with the account it uses.",
+    tone: "text-warning-text",
+    body: "This Google account has Google Health but no Fitbit device, so there is nothing to import. Pair your Fitbit Air in the Google Health app and sync again, or switch to the account it uses.",
   },
   connected: {},
   revoked: { line: "Access revoked", tone: "text-recovery-red-text", body: "Google access was revoked or expired. Sync is paused until you reconnect." },
@@ -74,16 +97,16 @@ const SOURCE: Record<SettingsVM["source"]["status"], { line?: string; tone?: str
 function OAuthLink({ label }: { label: string }) {
   return (
     <Button asChild size="touch" variant="default" className="w-full">
-      <Link href="/oauth/start" prefetch={false}>
+      <a href="/oauth/start">
         {label}
-      </Link>
+      </a>
     </Button>
   )
 }
 
 function SyncIcon({ status }: { status: SettingsVM["sync"][number]["status"] }) {
-  if (status === "ok") return <Check aria-hidden className="size-4 text-optimal" strokeWidth={2.5} />
-  if (status === "stale") return <TriangleAlert aria-hidden className="size-4 text-warning" strokeWidth={2} />
+  if (status === "ok") return <Check aria-hidden className="size-4 text-optimal-text" strokeWidth={2.5} />
+  if (status === "stale") return <TriangleAlert aria-hidden className="size-4 text-warning-text" strokeWidth={2} />
   if (status === "error") return <CircleAlert aria-hidden className="size-4 text-recovery-red-text" strokeWidth={2} />
   return <Minus aria-hidden className="size-4 text-muted-foreground" strokeWidth={2} />
 }
@@ -100,7 +123,7 @@ function DataTypes({ rows, now }: { rows: SettingsVM["sync"]; now: number }) {
       <summary className="flex min-h-13 cursor-pointer list-none items-center justify-between gap-3 rounded-md py-2 outline-none select-none focus-visible:ring-3 focus-visible:ring-ring/50 [&::-webkit-details-marker]:hidden">
         <span className={ROW_LABEL}>Data types</span>
         <span className="flex items-center gap-2">
-          <span className={cn("text-[13px] leading-[18px]", failing ? "text-recovery-red-text" : behind ? "text-warning" : "text-muted-foreground")}>{summary}</span>
+          <span className={cn("text-[13px] leading-[18px]", failing ? "text-recovery-red-text" : behind ? "text-warning-text" : "text-muted-foreground")}>{summary}</span>
           <ChevronDown aria-hidden className="size-4 text-muted-foreground transition-transform duration-200 ease-standard group-open:rotate-180 motion-reduce:transition-none" strokeWidth={2} />
         </span>
       </summary>
@@ -125,7 +148,7 @@ function DataTypes({ rows, now }: { rows: SettingsVM["sync"]; now: number }) {
  * Data source (spec §7.14): the source as one row (logo, name, last sync), its status only when something needs
  * doing, Sync now, and the per-type sync status folded underneath.
  */
-export function DataSource({ vm, now }: { vm: Pick<SettingsVM, "source" | "sync" | "import">; now: number }) {
+export function DataSource({ vm, now, googleEmail = null }: { vm: Pick<SettingsVM, "source" | "sync" | "import">; now: number; googleEmail?: string | null }) {
   const { source } = vm
   const s = SOURCE[source.status]
   const last = vm.sync.reduce<number | null>((m, r) => (r.lastSuccessAt && (!m || r.lastSuccessAt > m) ? r.lastSuccessAt : m), null)
@@ -167,14 +190,15 @@ export function DataSource({ vm, now }: { vm: Pick<SettingsVM, "source" | "sync"
         </span>
         <div className="min-w-0 flex-1">
           <p className="text-[15px] leading-[22px] font-semibold">{source.label}</p>
+          {googleEmail && source.status !== "not_connected" && source.status !== "demo" && <p className="truncate text-[13px] leading-[18px] text-foreground-secondary">{googleEmail}</p>}
           <p className={cn("truncate text-[13px] leading-[18px] text-muted-foreground tabular-nums", s.tone)}>{line}</p>
         </div>
       </div>
       {s.body && <p className={cn(BODY, "mt-3")}>{s.body}</p>}
       {source.needsPermissions && (
-        <div role="note" aria-labelledby="permissions-title" className="mt-4 rounded-xl bg-white/[0.04] p-4">
+        <div role="note" aria-labelledby="permissions-title" className="mt-4 rounded-xl bg-foreground/[0.04] p-4">
           <p id="permissions-title" className="flex items-center gap-2 text-[15px] leading-[22px] font-semibold">
-            <TriangleAlert aria-hidden className="size-4 shrink-0 text-warning" strokeWidth={2} />
+            <TriangleAlert aria-hidden className="size-4 shrink-0 text-warning-text" strokeWidth={2} />
             Pulse needs new permissions
           </p>
           <p className={cn(BODY, "mt-1")}>
@@ -193,7 +217,14 @@ export function DataSource({ vm, now }: { vm: Pick<SettingsVM, "source" | "sync"
           <Progress value={(vm.import.done / vm.import.total) * 100} aria-label="Import progress" className="h-1.5 bg-muted" />
         </div>
       )}
-      <div className="mt-4 grid grid-cols-2 gap-2">{actions}</div>
+      <div className="mt-4 grid grid-cols-2 gap-2">
+        {actions}
+        {source.status !== "demo" && source.status !== "not_connected" && (
+          <div className="col-span-2">
+            <SwitchGoogleButton current={googleEmail} />
+          </div>
+        )}
+      </div>
       {source.status !== "demo" && vm.sync.length > 0 && <DataTypes rows={vm.sync} now={now} />}
     </SectionShell>
   )
@@ -205,7 +236,7 @@ export function Profile({ profile }: { profile: SettingsVM["profile"] }) {
     ["Age", String(profile.age)],
     ["Sex", profile.sex === "male" ? "Male" : "Female"],
     ["Height", profile.heightCm ? `${profile.heightCm}\u00a0cm` : "Not set"],
-    ["Max heart rate", `${profile.maxHr}\u00a0bpm, ${profile.maxHrSource === "google" ? "from Google" : profile.maxHrSource}`],
+    ["Max heart rate", `${profile.maxHr}\u00a0bpm, ${profile.maxHrSource}`],
     ["Time zone", profile.timeZone],
   ]
   return (
@@ -215,7 +246,7 @@ export function Profile({ profile }: { profile: SettingsVM["profile"] }) {
       title="Profile"
       action={
         <EditProfileButton
-          defaults={{ birthDate: profile.birthDate, sex: profile.sex, maxHr: profile.maxHrSource === "set" ? profile.maxHr : null, heightCm: profile.heightCm }}
+          defaults={{ birthDate: profile.birthDate, sex: profile.sex, maxHr: profile.maxHrSource === "set" ? profile.maxHr : null, heightCm: profile.heightCm, timeZone: profile.timeZone }}
         />
       }
     >
@@ -227,21 +258,49 @@ export function Profile({ profile }: { profile: SettingsVM["profile"] }) {
           </div>
         ))}
       </dl>
-      <p className={cn(CAPTION, "mt-2")}>The time zone comes from the server’s <span translate="no">TZ</span> setting.</p>
+      <p className={cn(CAPTION, "mt-2")}>Your days start at midnight in your time zone. Edit changes it and recomputes your scores.</p>
     </SectionShell>
   )
 }
 
 /**
- * Settings body: configuration only (U21): Account, Data source (with sync), Profile, as one 640 px column at every
- * width. About, reports, exports and help live in More.
+ * Settings body: configuration only (U21), one section at a time (SettingsLayout): Account (with profile), Data source (with sync),
+ * App (appearance, install, notifications) and, with coach access, Coach. About, reports, exports and help live in More.
  */
-export function SettingsView({ vm, now, account }: { vm: SettingsVM; now: number; account: SettingsAccount }) {
-  return (
-    <div className="mx-auto flex w-full max-w-[640px] flex-col gap-3 md:gap-4">
-      <Account account={account} />
-      <DataSource vm={vm} now={now} />
-      <Profile profile={vm.profile} />
-    </div>
-  )
+export function SettingsView({ vm, now, account, coach, pushKey = null, initial }: { vm: SettingsVM; now: number; account: SettingsAccount; coach?: React.ReactNode; pushKey?: string | null; initial?: string | null }) {
+  const sections: SettingsSection[] = [
+    {
+      id: "account",
+      label: "Account",
+      node: (
+        <>
+          <Account account={account} />
+          <Profile profile={vm.profile} />
+          {/* Last and quiet: the one irreversible action sits below everything, away from the everyday controls. */}
+          {!account.demo && account.email !== null && (
+            <div className="flex justify-center pt-6 pb-2">
+              <DeleteAccountButton />
+            </div>
+          )}
+        </>
+      ),
+    },
+    { id: "source", label: "Data source", node: <DataSource vm={vm} now={now} googleEmail={account.googleEmail} /> },
+    {
+      id: "app",
+      label: "App",
+      node: (
+        <>
+          <SectionShell variant="card" level={2} id="appearance" title="Appearance">
+            <ThemePicker />
+            <p className="mt-2 text-[13px] leading-[18px] text-pretty text-muted-foreground">System follows this device’s light or dark setting.</p>
+          </SectionShell>
+          <AppSettings pushKey={pushKey} />
+        </>
+      ),
+    },
+    ...(coach ? [{ id: "coach" as const, label: "Coach", node: coach }] : []),
+  ]
+  // Keyed by the section asked for, so a link to another one (?s=) opens it even on this page.
+  return <SettingsLayout key={initial ?? ""} sections={sections} initial={initial} />
 }

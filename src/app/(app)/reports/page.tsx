@@ -2,6 +2,7 @@ import Link from "next/link"
 import { connection } from "next/server"
 import { cn } from "@/lib/utils"
 import { DAY, formatDay, formatValue, rangeLabel } from "@/lib/format"
+import { userCtx } from "@/server/queries/common"
 import { getReportArchive, type ReportListItem } from "@/server/queries/reports"
 import { MiniRing } from "@/components/metrics/MiniRing"
 import { DetailShell } from "@/components/shells/DetailShell"
@@ -53,7 +54,7 @@ function ViewSwitch({ view }: { view: View }) {
       scroll={false}
       aria-current={view === v ? "page" : undefined}
       className={cn(
-        "grid h-10 flex-1 place-items-center rounded-md text-[13px] font-bold tracking-[0.08em] uppercase outline-none transition-[background-color,color] duration-150 ease-standard focus-visible:ring-3 focus-visible:ring-ring/50",
+        "grid h-10 flex-1 place-items-center rounded-md text-[13px] font-bold tracking-[0.1em] uppercase outline-none transition-[background-color,color] duration-150 ease-standard focus-visible:ring-3 focus-visible:ring-ring/50",
         view === v ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground"
       )}
     >
@@ -75,7 +76,7 @@ function ViewSwitch({ view }: { view: View }) {
 export default async function ReportsPage({ searchParams }: PageProps<"/reports">) {
   await connection()
   const q = await searchParams
-  const vm = getReportArchive()
+  const vm = await getReportArchive(await userCtx())
   const empty = !vm.weeks.length && !vm.months.length
   // A first week can exist before any month has data, and vice versa: fall back to the kind that has rows.
   const view: View = (q.view === "months" && vm.months.length) || !vm.weeks.length ? "months" : "weeks"
@@ -103,7 +104,7 @@ export default async function ReportsPage({ searchParams }: PageProps<"/reports"
                 href="/reports?all=1"
                 replace
                 scroll={false}
-                className="mx-auto grid h-11 place-items-center rounded-full px-5 text-xs font-bold tracking-[0.08em] text-foreground/85 uppercase outline-none transition-[background-color,color] duration-150 ease-standard hover:bg-white/[0.06] hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
+                className="mx-auto grid h-11 place-items-center rounded-full px-5 text-xs font-bold tracking-[0.1em] text-foreground/85 uppercase outline-none transition-[background-color,color] duration-150 ease-standard hover:bg-foreground/[0.06] hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
               >
                 Show earlier weeks
               </Link>

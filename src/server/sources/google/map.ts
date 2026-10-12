@@ -7,6 +7,7 @@
 import type { dailyMetrics, exercises, sleepSessions } from "../../db/schema";
 import type { DataTypeId } from "./catalogue";
 import type { ExtraKey } from "@/lib/extraMetrics";
+import { type LogData, type Meal, MEALS } from "@/lib/log";
 import { localDay } from "../../time";
 
 type Obj = Record<string, unknown>;
@@ -50,7 +51,7 @@ const platform = (p: unknown) => str(at(p, "dataSource.platform"));
 
 // --- Daily rows -----------------------------------------------------------------------------------
 
-export type DailyValues = Partial<Omit<typeof dailyMetrics.$inferInsert, "day" | "source">>;
+export type DailyValues = Partial<Omit<typeof dailyMetrics.$inferInsert, "userId" | "day" | "source">>;
 export type DailyRow = { day: string } & DailyValues;
 
 /** Payload object -> daily_metrics columns, per list type. Civil-date types keep Google's day as-is. */
@@ -84,14 +85,14 @@ const DAILY = {
 const ZONE_TYPES = ["LIGHT", "MODERATE", "VIGOROUS", "PEAK"];
 
 /**
- * `heartRateZones[]` -> JSON `[light, moderate, vigorous, peak]` minimum bpm, then the peak maximum. Null unless all
+ * `heartRateZones[]` -> `[light, moderate, vigorous, peak]` minimum bpm, then the peak maximum. Null unless all
  * four zones are there with increasing minimums and a peak maximum above the peak minimum.
  */
-function hrZones(v: unknown): string | null {
+function hrZones(v: unknown): number[] | null {
   const zone = (type: string) => list(v).find((z) => at(z, "heartRateZoneType") === type);
   const bounds = [...ZONE_TYPES.map((t) => int(at(zone(t), "minBeatsPerMinute"))), int(at(zone("PEAK"), "maxBeatsPerMinute"))];
   if (bounds.some((b, i) => b === null || b <= 0 || (i > 0 && b <= bounds[i - 1]!))) return null;
-  return JSON.stringify(bounds);
+  return bounds as number[];
 }
 
 export type DailyType = keyof typeof DAILY;
@@ -214,9 +215,9 @@ export function mapStepsMinutes(points: unknown[]): Map<number, number> {
 export type Stage = "awake" | "light" | "deep" | "rem";
 const STAGES: Record<string, Stage> = { AWAKE: "awake", LIGHT: "light", DEEP: "deep", REM: "rem" };
 
-export type SessionRow = typeof sleepSessions.$inferInsert;
+export type SessionRow = Omit<typeof sleepSessions.$inferInsert, "userId">;
 export type SegmentRow = { sessionId: string; startTs: number; endTs: number; stage: Stage };
-export type ExerciseRow = typeof exercises.$inferInsert;
+export type ExerciseRow = Omit<typeof exercises.$inferInsert, "userId">;
 
 /** A point's stable id: its resource name, which survives a re-fetch, else type and start. */
 const pointId = (p: unknown, kind: string, start: number) => str(at(p, "name")) ?? `${kind}-${start}`;
@@ -399,4 +400,62 @@ export function mapRecords(type: "electrocardiogram" | "irregular-rhythm-notific
     out.push({ id: pointId(p, kind, ts), kind, ts, day: localDay(ts, tz), data });
   }
   return out;
+}
+
+// --- Logged entries -------------------------------------------------------------------------------
+
+export type ReadableLogType = "hydration-log" | "nutrition-log" | "weight" | "body-fat";
+export type MappedEntry = { name: string; ts: number; day: string; data: LogData[ReadableLogType]; app?: string | null };
+
+const MEAL_TYPES: ReadonlySet<string> = new Set(MEALS.map((m) => m[0]));
+const tenth = (v: number) => Math.round(v * 10) / 10;
+
+/** Payload object -> the `data` Pulse stores for a logged entry, in the shapes `write.ts` sends. Null when unreadable. */
+const LOGGED: { [T in ReadableLogType]: (o: Obj) => { ts: number | null; data: LogData[T] | null } } = {
+  "hydration-log": (o) => {
+    const ml = num(at(o, "amountConsumed.milliliters"));
+    return { ts: secs(at(o, "interval.startTime")), data: ml === null || ml <= 0 ? null : { ml: Math.round(ml) } };
+  },
+  "nutrition-log": (o) => {
+    // proto3 drops a zero, so a food without energy is 0 kcal.
+    const kcal = num(at(o, "energy.kcal")) ?? 0;
+    const name = str(o.foodDisplayName);
+    const meal = str(o.mealType);
+    const grams = (v: unknown) => (num(v) === null ? null : tenth(num(v)!));
+    return {
+      ts: secs(at(o, "interval.startTime")),
+      data: {
+        // "Quick calories" is what Pulse writes for a food without a name (write.ts).
+        name: name === "Quick calories" ? null : name,
+        meal: meal !== null && MEAL_TYPES.has(meal) ? (meal as Meal) : "SNACK",
+        kcal: Math.round(kcal),
+        protein: grams(at(list(o.nutrients).find((n) => at(n, "nutrient") === "PROTEIN"), "quantity.grams")),
+        carbs: grams(at(o, "totalCarbohydrate.grams")),
+        fat: grams(at(o, "totalFat.grams")),
+      },
+    };
+  },
+  weight: (o) => {
+    const g = num(o.weightGrams);
+    return { ts: secs(at(o, "sampleTime.physicalTime")), data: g === null || g <= 0 ? null : { kg: tenth(g / 1000) } };
+  },
+  "body-fat": (o) => {
+    const pct = num(o.percentage);
+    return { ts: secs(at(o, "sampleTime.physicalTime")), data: pct === null || pct <= 0 ? null : { pct: tenth(pct) } };
+  },
+};
+
+/**
+ * A `list` window's points of a readable log type as logged entries, on their local day. `complete` is false when any
+ * point could not be read, so the caller never takes an unreadable point for a deleted one.
+ */
+export function mapLogEntries(type: ReadableLogType, points: unknown[], tz: string): { entries: MappedEntry[]; complete: boolean } {
+  const entries: MappedEntry[] = [];
+  for (const p of points) {
+    const name = str(at(p, "name"));
+    const o = at(p, bodyKey(type));
+    const { ts, data } = isObj(o) ? LOGGED[type](o) : { ts: null, data: null };
+    if (name !== null && ts !== null && data !== null) entries.push({ name, ts, day: localDay(ts, tz), data, app: platform(p) });
+  }
+  return { entries, complete: entries.length === points.length };
 }

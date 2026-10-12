@@ -1,4 +1,3 @@
-import type { Viewport } from "next"
 import { Rabbit, Turtle } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { AGE_LABEL, formatValue, MISSING } from "@/lib/format"
@@ -16,8 +15,6 @@ import { pageDay, type SearchParams } from "../../_lib/day"
 import { CAPTION } from "@/components/metrics/primitives"
 
 export const metadata = { title: "Healthspan" }
-// The browser bar matches the page's darker ground (spec §11 M3).
-export const viewport: Viewport = { themeColor: "#101518" }
 
 const INFO = {
   title: "About Healthspan",
@@ -53,8 +50,8 @@ function Orb({ vm, compact }: { vm: HealthspanVM; compact?: boolean }) {
 
 /** Healthspan `/health/healthspan?d=` (spec §7.7): the ISO week containing `d`. */
 export default async function HealthspanPage({ searchParams }: PageProps<"/health/healthspan">) {
-  const { d } = await pageDay(searchParams as SearchParams, "/health/healthspan")
-  const vm = getHealthspan(d)
+  const { d, ctx } = await pageDay(searchParams as SearchParams, "/health/healthspan")
+  const vm = await getHealthspan(d, ctx)
   const r = vm.result.value
   const pace = r ? { value: r.pace, reason: null, provisional: r.paceProvisional } : { value: null, reason: vm.result.reason, provisional: false }
   const hasHistory = vm.history.some((p) => p.value !== null)

@@ -50,8 +50,8 @@ Both Δage values use the reference at today's age, so flat inputs give exactly 
 |---|---|---|---|---|
 | Sleep duration | `sleepHours` | h | mean | main sleep `asleep_min` / 60 |
 | Sleep regularity | `sri` | SRI, −100..100 | mean | `sleepRegularityIndex` over the 7 days ending that day |
-| Zones 1–3 | `zone13Min` | min/day | mean × 7 = min/week | Google's `time-in-heart-rate-zone` roll-up, LIGHT + MODERATE (`light_moderate_min`); on a day without it, Pulse's `timeInZone` on that day's `hr_samples` (Light + Moderate) |
-| Zones 4–5 | `zone45Min` | min/day | mean × 7 = min/week | same, VIGOROUS + PEAK (`vigorous_peak_min`) |
+| Zones 1–3 | `zone13Min` | min/day | mean × 7 = min/week | Pulse's `timeInZone` on that day's heart rate, zones 1–3: 50–80% of heart-rate reserve (`src/core/scoring/zones.ts`, the same zones as Strain). Google's roll-up is no longer read here (2026-10-05) |
+| Zones 4–5 | `zone45Min` | min/day | mean × 7 = min/week | same, zones 4–5: 80% of heart-rate reserve and above |
 | Strength | `strengthMin` | min/day | mean × 7 = min/week | `exercises` with a strength type; 0 on a worn day without one |
 | Steps | `steps` | steps/day | mean, capped at the plateau | `daily_metrics.steps` |
 | VO2max | `vo2maxRun`, `vo2maxDaily` | mL/kg/min | mean of the chosen kind | `daily_metrics.vo2max_run`, `vo2max_daily` |
@@ -176,3 +176,17 @@ Without a height, the eight remaining terms renormalize by 9/8 and give Δage +5
 - Finch CE, Pike MC, Witten M. Slow mortality rate accelerations during aging in some animals approximate that of humans. *Science* 1990;249(4971):902–905. doi:10.1126/science.2392680
 - Bull FC, et al. World Health Organization 2020 guidelines on physical activity and sedentary behaviour. *Br J Sports Med* 2020;54(24):1451–1462. doi:10.1136/bjsports-2020-102955
 - noop `android/app/src/main/java/com/noop/analytics/VitalityEngine.kt` (ryanbr/noop, PolyForm Noncommercial 1.0.0): the overlap shrink and the ln 2 / 8 conversion.
+
+## Factor copy
+
+Code: `src/core/algorithms/healthspanFactor.ts`. Tests: `healthspanFactor.test.ts`. UI: each factor row on Healthspan, opened in place (spec §11 R43).
+
+Each factor also carries its 30-day mean (`recent`, the Pace of Aging window) beside the 6-month mean the score uses, so the row marks both, as the reference app does. When the factor opens, a heading and one sentence say where it stands, from the years it adds to or takes off Pulse Age:
+
+| Years | Heading | Sentence |
+|---|---|---|
+| −0.3 or fewer | Outperforming | You're boosting your long-term health with your *factor*. Keep it up to hold on to the benefit. |
+| between −0.3 and 0.3 | On track | Your *factor* is close to the target for your age. Small gains here add up over the years. |
+| 0.3 or more | Room to improve | Your *factor* is adding years to your Pulse Age. Moving it toward the target for your age would take them off. |
+
+The ±0.3-year band (`ON_TRACK_YEARS`, *tunable*) keeps a factor that barely moves Pulse Age from being praised or blamed.

@@ -37,7 +37,7 @@ export function MetricToggle({ metric }: { metric: ImpactMetricKey }) {
         <ToggleGroupItem
           key={m.key}
           value={m.key}
-          className="h-10 min-w-11 rounded-md! px-3 text-[13px] font-bold tracking-[0.06em] text-muted-foreground uppercase transition-[background-color,color] duration-150 ease-standard hover:bg-transparent hover:text-foreground data-[state=on]:bg-secondary data-[state=on]:text-foreground"
+          className="h-10 min-w-11 rounded-md! px-3 text-[13px] font-bold tracking-[0.1em] text-muted-foreground uppercase transition-[background-color,color] duration-150 ease-standard hover:bg-transparent hover:text-foreground data-[state=on]:bg-secondary data-[state=on]:text-foreground"
         >
           {m.label}
         </ToggleGroupItem>
@@ -56,7 +56,7 @@ export function ImpactList({ vm }: { vm: JournalInsightsVM }) {
   const sd = vm.unit === "SD"
   const fx = (v: number, signed = true) => (sd ? `${formatValue(signed ? "signed1" : "decimal1", v)} SD` : `${formatValue(signed ? "signedInt" : "int", v)}%`)
   const avg = (v: number | null) => (v === null ? "--" : sd ? `${formatValue("signed1", v)} SD` : `${formatValue("int", v)}%`)
-  const tone = item?.effect === "positive" ? "text-optimal" : item?.effect === "negative" ? "text-warning" : "text-foreground-secondary"
+  const tone = item?.effect === "positive" ? "text-optimal-text" : item?.effect === "negative" ? "text-warning-text" : "text-foreground-secondary"
 
   return (
     <>
@@ -69,7 +69,6 @@ export function ImpactList({ vm }: { vm: JournalInsightsVM }) {
           setOpen(k)
           setLast(vm.items.find((i) => i.key === k) ?? null)
         }}
-        checkInHref="/journal?checkin=1"
         outcome={metricWord(vm.metric)}
       />
       <ResponsiveSheet open={!!current} onOpenChange={(o) => !o && setOpen(null)} title={item?.label ?? "Behaviour"}>

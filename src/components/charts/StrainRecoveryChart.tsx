@@ -3,9 +3,8 @@
 import { Bar, CartesianGrid, ComposedChart, LabelList, Line, XAxis, YAxis } from "recharts"
 import { recoveryBand } from "@/lib/bands"
 import { DAY, formatDay, formatValue } from "@/lib/format"
-import { ChartTooltip, ChartTooltipContent } from "@/components/ui/chart"
 import { Skeleton } from "@/components/ui/skeleton"
-import { AXIS, ChartFigure, GRID, TOOLTIP_CLASS, TooltipLine, useSeriesAnimation } from "./ChartFrame"
+import { AXIS, ChartFigure, GRID, LABEL_HALO, useSeriesAnimation } from "./ChartFrame"
 
 export type StrainRecoveryPoint = { day: string; strain: number | null; recovery: number | null }
 
@@ -14,11 +13,16 @@ const BAND_TEXT = { green: "var(--recovery-green)", yellow: "var(--recovery-yell
 const BAND_FILL = { green: "var(--recovery-green)", yellow: "var(--recovery-yellow)", red: "var(--recovery-red)" } as const
 const RIGHT_TICKS = [0, 33, 66, 100]
 const LEFT_TICKS = [0, 7, 14, 21]
+/**
+ * How far today's lit column runs below the plot, behind the 40 px two-line day tick, with room under the date.
+ * The bottom margin keeps it inside the svg: at 0 the svg clipped its last 4 px, square corners and all.
+ */
+const TODAY_TAIL = 48
 
 type Row = StrainRecoveryPoint & { weekday: string; dayOfMonth: string; date: string; today: boolean; hl: number | null }
 
 type TickProps = { x?: number; y?: number; payload?: { value: string | number; index?: number }; rows?: Row[] }
-type LabelProps = { x?: number | string; y?: number | string; value?: unknown }
+type LabelProps = { x?: number | string; y?: number | string; value?: unknown; index?: number; rows?: Row[] }
 
 /** Two-line day tick ("Fri" over "17"); today in white and bold. */
 function XTick({ x = 0, y = 0, payload, rows = [] }: TickProps) {
@@ -51,20 +55,41 @@ function RecoveryDot({ cx, cy, payload }: { cx?: number; cy?: number; payload?: 
   return <circle cx={cx} cy={cy} r={4} fill="var(--card)" stroke={BAND_FILL[recoveryBand(payload.recovery)]} strokeWidth={2} />
 }
 
-function RecoveryLabel({ x, y, value }: LabelProps) {
+/** Height on the plot, 0 (floor) to 1 (top), so the two axes compare. */
+const heightOf = (r: Row | undefined, k: "strain" | "recovery") => (r?.[k] == null ? null : k === "strain" ? r.strain! / 21 : r.recovery! / 100)
+
+/**
+ * Each label sits where neither line runs: when the other series' dot is close, on the side away from it; otherwise
+ * above a peak and under a valley, off its own line; on a slope, away from the other dot (Recovery above, Strain under
+ * with one series missing, as the reference app draws them). Near the floor it always goes above, clear of the day ticks.
+ */
+function labelDy(rows: Row[], index: number | undefined, k: "strain" | "recovery") {
+  const i = index ?? -1
+  const self = heightOf(rows[i], k)
+  const other = heightOf(rows[i], k === "strain" ? "recovery" : "strain")
+  const near = [heightOf(rows[i - 1], k), heightOf(rows[i + 1], k)].filter((v): v is number => v !== null)
+  const awayFromOther = other === null ? k === "recovery" : self !== null && self >= other
+  const above =
+    self === null || (other !== null && Math.abs(self - other) < 0.15) ? awayFromOther
+    : near.length && near.every((v) => v <= self) ? true
+    : near.length && near.every((v) => v >= self) ? false
+    : awayFromOther
+  return above || (self ?? 0) < 0.17 ? -10 : 20
+}
+
+function RecoveryLabel({ x, y, value, index, rows = [] }: LabelProps) {
   if (typeof value !== "number" || x == null || y == null) return null
   return (
-    <text x={Number(x)} y={Number(y) - 10} textAnchor="middle" fontSize={12} fontWeight={700} fill={BAND_TEXT[recoveryBand(value)]}>
+    <text x={Number(x)} y={Number(y) + labelDy(rows, index, "recovery")} textAnchor="middle" fontSize={12} fontWeight={700} fill={BAND_TEXT[recoveryBand(value)]} {...LABEL_HALO}>
       {Math.round(value)}%
     </text>
   )
 }
 
-/** Under the dot as the reference app draws it; above it near the floor, so it never sits on the day ticks. */
-function StrainLabel({ x, y, value }: LabelProps) {
+function StrainLabel({ x, y, value, index, rows = [] }: LabelProps) {
   if (typeof value !== "number" || x == null || y == null) return null
   return (
-    <text x={Number(x)} y={Number(y) + (value >= 3.5 ? 20 : -10)} textAnchor="middle" fontSize={12} fontWeight={700} fill="var(--strain-text)">
+    <text x={Number(x)} y={Number(y) + labelDy(rows, index, "strain")} textAnchor="middle" fontSize={12} fontWeight={700} fill="var(--strain-text)" {...LABEL_HALO}>
       {formatValue("decimal1", value)}
     </text>
   )
@@ -93,7 +118,7 @@ export function StrainRecoveryChart({ points, today, grow }: { points: StrainRec
 
   return (
     <ChartFigure summary={summary} config={{ strain: { label: "Strain" }, recovery: { label: "Recovery" } }} className={grow ? "h-[232px] xl:h-auto xl:min-h-[232px]" : "h-[232px]"} grow={grow}>
-      <ComposedChart data={rows} accessibilityLayer margin={{ top: 20, right: 4, bottom: 0, left: 4 }} barCategoryGap="18%">
+      <ComposedChart data={rows} accessibilityLayer margin={{ top: 20, right: 4, bottom: TODAY_TAIL - 40 + 2, left: 4 }} barCategoryGap="18%">
         <CartesianGrid {...GRID} yAxisId="s" />
         <XAxis dataKey="day" interval={0} height={40} tick={<XTick rows={rows} />} {...AXIS} tickMargin={4} />
         <YAxis yAxisId="s" domain={[0, 21]} ticks={LEFT_TICKS} width={24} tick={{ fill: "var(--strain-text)", fontSize: 12, fontWeight: 600 }} {...AXIS} />
@@ -103,32 +128,11 @@ export function StrainRecoveryChart({ points, today, grow }: { points: StrainRec
         <Bar
           yAxisId="r"
           dataKey="hl"
-          fill="rgb(255 255 255 / 0.06)"
+          fill="color-mix(in srgb, var(--foreground) 6%, transparent)"
           isAnimationActive={false}
           tooltipType="none"
           shape={(b: { x?: number; y?: number; width?: number; height?: number }) =>
-            b.height ? <rect x={b.x} y={b.y} width={b.width} height={b.height + 44} rx={6} fill="rgb(255 255 255 / 0.06)" /> : <g />
-          }
-        />
-        <ChartTooltip
-          isAnimationActive={false}
-          cursor={{ fill: "rgb(255 255 255 / 0.04)" }}
-          allowEscapeViewBox={{ x: false, y: false }}
-          wrapperStyle={{ pointerEvents: "none" }}
-          content={
-            <ChartTooltipContent
-              className={TOOLTIP_CLASS}
-              hideIndicator
-              labelFormatter={(_, payload) => (payload?.[0]?.payload as Row | undefined)?.date ?? ""}
-              formatter={(value, name) => {
-                if (name === "hl" || value == null) return null
-                return name === "strain" ? (
-                  <TooltipLine color="var(--strain)">Strain {formatValue("decimal1", Number(value))}</TooltipLine>
-                ) : (
-                  <TooltipLine color={BAND_FILL[recoveryBand(Number(value))]}>Recovery {Math.round(Number(value))}%</TooltipLine>
-                )
-              }}
-            />
+            b.height ? <rect x={b.x} y={b.y} width={b.width} height={b.height + TODAY_TAIL} rx={6} fill="color-mix(in srgb, var(--foreground) 6%, transparent)" /> : <g />
           }
         />
         <Line
@@ -143,7 +147,7 @@ export function StrainRecoveryChart({ points, today, grow }: { points: StrainRec
           activeDot={false}
           {...anim}
         >
-          <LabelList dataKey="recovery" content={<RecoveryLabel />} />
+          <LabelList dataKey="recovery" content={<RecoveryLabel rows={rows} />} />
         </Line>
         <Line
           yAxisId="s"
@@ -156,7 +160,7 @@ export function StrainRecoveryChart({ points, today, grow }: { points: StrainRec
           activeDot={{ r: 5, fill: "var(--strain)", stroke: "var(--card)", strokeWidth: 2 }}
           {...anim}
         >
-          <LabelList dataKey="strain" content={<StrainLabel />} />
+          <LabelList dataKey="strain" content={<StrainLabel rows={rows} />} />
         </Line>
       </ComposedChart>
     </ChartFigure>

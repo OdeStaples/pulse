@@ -1,59 +1,29 @@
 // Retakes the app screenshots in docs/screenshots/ from a running demo-mode app, framed with margin:
-//   GOOGLE_OAUTH_ENABLED=false TZ=Asia/Kolkata pnpm dev -p 3317   (repo root, in another terminal)
+//   DATA_SOURCE=demo TZ=Asia/Kolkata pnpm dev -p 3317   (repo root, in another terminal)
 //   pnpm shots                                                    (in site/; APP_URL overrides the address)
-// Needs the repo root's `pnpm install` (Playwright). Phone: 390 wide at 3x in a device frame. Laptop: 1440 x 900
-// at 2x in a window frame. Both on a transparent margin, so they sit on any background (README, site).
+// Needs the repo root's `pnpm install` (Playwright). Phone: 390 wide at 3x in a device frame, cut on a clean row or
+// card boundary (see cleanCut). Laptop: 1440 x 900 at 2x in a window frame. Both on a transparent margin, so they sit
+// on any background (README, site). Written as lossless PNG: palette quantising smears small UI text.
 import { mkdirSync } from "node:fs"
-import { createRequire } from "node:module"
 import { fileURLToPath } from "node:url"
 import sharp from "sharp"
+import { chromium, APP, DEVICES, SCREENS, STATUS, demoSession, openScreen } from "./app.mjs"
 
-const require = createRequire(new URL("../../package.json", import.meta.url))
-const { chromium } = require("@playwright/test")
-
-const APP = process.env.APP_URL ?? "http://localhost:3317"
 const OUT = (name) => fileURLToPath(new URL(`../../docs/screenshots/${name}.png`, import.meta.url))
 
-const SCREENS = [
-  ["home", "/"],
-  ["recovery", "/recovery"],
-  ["strain", "/strain"],
-  ["sleep", "/sleep"],
-  ["health", "/health"],
-  // On the phone, scroll to Heart rhythm and Measurements, the newer half of the screen.
-  ["health-monitor", "/health/monitor", (page, kind) => kind === "phone" &&
-    page.getByRole("heading", { name: "Heart rhythm" }).evaluate((h) => scrollBy(0, h.getBoundingClientRect().top - 110))],
-  ["journal", "/journal"],
-  ["trends", "/trends"],
-  ["dashboard-editor", "/", (page) => page.getByRole("button", { name: "Edit My Dashboard" }).click()],
-]
-
-// The phone's status bar is drawn by the frame, so the page gets the rest of an 844 pt screen.
-const STATUS = 50
-const DEVICES = {
-  phone: { viewport: { width: 390, height: 844 - STATUS }, deviceScaleFactor: 3, isMobile: true, hasTouch: true },
-  laptop: { viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2 },
-}
-
 mkdirSync(fileURLToPath(new URL("../../docs/screenshots/", import.meta.url)), { recursive: true })
-const res = await fetch(`${APP}/login/demo`, { method: "POST", redirect: "manual" })
-const token = /pulse_session=([^;]+)/.exec(res.headers.get("set-cookie") ?? "")?.[1]
-if (!token) throw new Error(`No demo session from ${APP}/login/demo: is the app running in demo mode?`)
+const token = await demoSession()
 
 const browser = await chromium.launch()
 for (const [kind, opts] of Object.entries(DEVICES)) {
   const ctx = await browser.newContext({ ...opts, timezoneId: "Asia/Kolkata", reducedMotion: "reduce", colorScheme: "dark" })
-  await ctx.addCookies([{ name: "pulse_session", value: token, url: APP }])
+  await ctx.addCookies([{ name: "better-auth.session_token", value: token, url: APP }])
   const page = await ctx.newPage()
-  for (const [name, path, act] of SCREENS) {
-    await page.goto(APP + path, { waitUntil: "networkidle" })
-    // The dev-mode indicator is not part of the app.
-    await page.addStyleTag({ content: "nextjs-portal { display: none !important; }" })
-    if (act) await act(page, kind)
-    await page.evaluate(() => document.fonts.ready)
-    await page.waitForTimeout(600)
+  for (const screen of SCREENS) {
+    const name = screen[0]
+    const height = await openScreen(page, kind, screen)
     const raw = await page.screenshot({ type: "png" })
-    await frame(kind, raw, opts.deviceScaleFactor, OUT(`${kind}-${name}`))
+    await frame(kind, raw, opts.deviceScaleFactor, height, OUT(`${kind}-${name}`))
     console.log(`wrote docs/screenshots/${kind}-${name}.png`)
   }
   await ctx.close()
@@ -61,8 +31,8 @@ for (const [kind, opts] of Object.entries(DEVICES)) {
 await browser.close()
 
 // Draws the raw capture inside a device or window frame on a transparent margin, then writes a compact PNG.
-async function frame(kind, png, scale, out) {
-  const { width, height } = DEVICES[kind].viewport
+async function frame(kind, png, scale, height, out) {
+  const { width } = DEVICES[kind].viewport
   const src = `data:image/png;base64,${png.toString("base64")}`
   const phone = kind === "phone"
   const html = `<!doctype html><html><head><style>
@@ -92,6 +62,7 @@ img { display: block; width: ${width}px; height: ${height}px; }
   await page.setContent(html)
   const shot = await page.locator("body").screenshot({ omitBackground: true, type: "png" })
   await page.close()
-  // Palette PNG: about a third of the size, no visible banding on these flat, dark screens.
-  await sharp(shot).png({ palette: true, quality: 92, effort: 10, compressionLevel: 9 }).toFile(out)
+  // Lossless: a palette PNG is a third of the size but dithers the antialiasing of small UI text, which then reads as
+  // blur once the site downscales it. The site serves AVIF and WebP made from this file.
+  await sharp(shot).png({ compressionLevel: 9, adaptiveFiltering: true }).toFile(out)
 }

@@ -326,12 +326,12 @@ export const METRICS: KitEntry[] = [
     name: "DriverList",
     file: "src/components/metrics/DriverList.tsx",
     use: "Recovery's “What shaped it” and Journal Insights' behaviour impacts.",
-    props: ["variant: recovery | impact", "unit: pts | % | SD", "data: Metric<DriverItem[]>", "selectedKey, onSelect", "checkInHref, outcome"],
+    props: ["variant: recovery | impact", "unit: pts | % | SD", "data: Metric<DriverItem[]>", "selectedKey, onSelect", "outcome"],
     states: [
       { name: "recovery", node: <DriverList variant="recovery" unit="pts" data={fx.recoveryDrivers} /> },
       { name: "impact, provisional, selectable", node: <SelectableImpact /> },
       { name: "empty (recovery)", node: <DriverList variant="recovery" unit="pts" data={null} /> },
-      { name: "empty (impact): check in prompt", node: <DriverList variant="impact" unit="%" data={fx.ok([])} checkInHref="/journal" /> },
+      { name: "empty (impact): check in prompt", node: <DriverList variant="impact" unit="%" data={fx.ok([])} /> },
       {
         name: "every reason code",
         node: (
@@ -535,8 +535,14 @@ export const METRICS: KitEntry[] = [
     props: ["age, deltaYears", "provisional", "size (px)", "reason", "compact"],
     cols: 3,
     states: [
-      { name: "younger", center: true, node: <AgeOrb age={34.1} deltaYears={-2.4} size={220} /> },
-      { name: "older, provisional", center: true, node: <AgeOrb age={41.6} deltaYears={3.1} provisional size={220} /> },
+      { name: "8.9 younger: green", center: true, node: <AgeOrb age={27.6} deltaYears={-8.9} size={220} /> },
+      { name: "4 younger: blue-green", center: true, node: <AgeOrb age={32.5} deltaYears={-4} size={220} /> },
+      { name: "1.5 younger: cyan", center: true, node: <AgeOrb age={35} deltaYears={-1.5} size={220} /> },
+      { name: "level: blue", center: true, node: <AgeOrb age={36.5} deltaYears={0} size={220} /> },
+      { name: "1.5 older: blue over warm", center: true, node: <AgeOrb age={38} deltaYears={1.5} size={220} /> },
+      { name: "3.1 older, provisional: amber-brown", center: true, node: <AgeOrb age={41.6} deltaYears={3.1} provisional size={220} /> },
+      { name: "7 older: rust", center: true, node: <AgeOrb age={43.5} deltaYears={7} size={220} /> },
+      { name: "12 older: red", center: true, node: <AgeOrb age={48.5} deltaYears={12} size={220} /> },
       { name: "reason", center: true, node: <AgeOrb age={null} deltaYears={null} reason="calibrating" size={220} /> },
       { name: "Health hub size (drops the delta line)", center: true, node: <AgeOrb age={36.5} deltaYears={0.2} size={140} /> },
       { name: "compact (sticky header)", center: true, node: <AgeOrb age={34.1} deltaYears={-2.4} compact /> },

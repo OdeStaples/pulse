@@ -1,4 +1,3 @@
-// The glossary at /glossary/. `metric` links a term to its metric page by the app slug (see metrics.ts).
 export type Term = { term: string; id: string; definition: string; metric?: string }
 
 export const GLOSSARY: Term[] = [
@@ -6,7 +5,7 @@ export const GLOSSARY: Term[] = [
   { term: "Baseline", id: "baseline", definition: "Your own normal for a vital, built from earlier nights only: a running average that leans on the last two weeks and clips extreme nights. Pulse compares each night with it rather than with other people." },
   { term: "Energy Bank", id: "energy-bank", metric: "energy-bank", definition: "A 0-100% estimate of the energy left in your day. It starts from Recovery and sleep, drains with time awake, heart-rate load and stress, and recharges with calm minutes and naps." },
   { term: "Fitbit Air", id: "fitbit-air", definition: "Google's screenless fitness band. It records heart rate, sleep and other vitals and syncs them to the Google Health app, which is where Pulse reads them from." },
-  { term: "Google Health API", id: "google-health-api", definition: "Google's API for reading a user's health data with their permission. Pulse uses it, with your own Google Cloud OAuth client, to import your Fitbit Air data to your server." },
+  { term: "Google Health API", id: "google-health-api", definition: "Google's API for reading a user's health data with their permission. Pulse uses it, with your own Google Cloud OAuth client, to import your wearable's data to your server." },
   { term: "Hazard ratio", id: "hazard-ratio", metric: "pulse-age", definition: "How much more or less likely an event (here, death from any cause) is in one group than in a reference group over the same time. Pulse Age turns published hazard ratios into years." },
   { term: "Heart rate recovery", id: "heart-rate-recovery", metric: "hr-recovery", definition: "How far your heart rate falls in the first minute after a hard effort, in bpm. Larger drops go with better fitness." },
   { term: "Heart-rate reserve", id: "heart-rate-reserve", metric: "strain", definition: "The gap between your resting and maximum heart rate. Strain measures each minute's effort as a share of it." },
@@ -17,10 +16,10 @@ export const GLOSSARY: Term[] = [
   { term: "Provisional", id: "provisional", definition: "Pulse's label for a score computed before it has enough of your history to be reliable. Pulse shows no number at all when it has too little data, rather than a guess." },
   { term: "Pulse Age", id: "pulse-age", metric: "pulse-age", definition: "An estimate of how old your body behaves, from nine habits and vitals compared with a fit person of your age and sex. Built on population studies, not a clinical test." },
   { term: "Recovery", id: "recovery", metric: "recovery", definition: "A 0-100% score each morning of how ready your body is for strain, from HRV, resting heart rate, sleep, respiratory rate and skin temperature against your baselines." },
-  { term: "Resting heart rate", id: "resting-heart-rate", metric: "resting-heart-rate", definition: "Your heart rate at rest. Pulse takes the lowest 5-minute average during your main sleep." },
+  { term: "Resting heart rate", id: "resting-heart-rate", metric: "resting-heart-rate", definition: "Your heart rate at rest. Pulse uses Google’s daily resting heart rate, with the lowest 5-minute sleep average as a fallback when Google has none." },
   { term: "Restorative sleep", id: "restorative-sleep", metric: "sleep", definition: "Deep and REM sleep as a share of time asleep. Wrist devices estimate sleep stages only moderately well, so Pulse gives it a modest weight." },
   { term: "RMSSD", id: "rmssd", metric: "hrv", definition: "Root mean square of successive differences between heartbeats: the standard short-term HRV measure, and the one Google Health reports nightly." },
-  { term: "Self-hosting", id: "self-hosting", definition: "Running software on a computer you control instead of a company's servers. Pulse runs as one Docker container, and your data stays in its database volume." },
+  { term: "Self-hosting", id: "self-hosting", definition: "Running software on a computer you control instead of a company's servers. Pulse runs as two Docker containers, the app and its Postgres database, and your data stays in that database on your machine." },
   { term: "Sleep debt", id: "sleep-debt", metric: "sleep-planner", definition: "Sleep you owe from recent nights when you slept less than you needed. Part of it is added to tonight's sleep need." },
   { term: "Sleep efficiency", id: "sleep-efficiency", metric: "sleep", definition: "Time asleep as a share of time in bed." },
   { term: "Sleep need", id: "sleep-need", metric: "sleep-planner", definition: "How much sleep you need tonight: your usual need from the last 28 nights, plus extra for a hard day and for sleep debt, minus naps." },

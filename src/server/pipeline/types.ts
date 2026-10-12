@@ -19,11 +19,16 @@ import type { StrainTarget } from "@/core/algorithms/strainTarget";
  * (healthspan and fitness age agree with whole years on birthdays). 4: local days open at the right instant
  * where DST starts at midnight (Santiago, Havana, Azores...), so the 23-hour day is the right one. 5: Pulse Age's
  * stored key is `pulseAge` (was a brand name), so stored healthspan rows rescore. 6: Google's inputs first (its daily
- * zones, resting HR, time in zones, skin-temperature baseline and personal ranges), four named zones.
+ * zones, resting HR, time in zones, skin-temperature baseline and personal ranges), four named zones. 7: five
+ * display zones on heart-rate reserve (Strain's and WHOOP's 50/60/70/80/90%) in place of Google's four. 8: max HR
+ * no longer from Google's PEAK zone (a flat 220), so zones and Strain use the person's own or Tanaka's.
+ * 10: each Healthspan factor keeps its 30-day mean beside the 6-month one (health-03's two markers).
  */
-export const SCORING_VERSION = 6;
+export const SCORING_VERSION = 10;
 
 export type PipelineOptions = {
+  /** Whose data: every read and write is scoped to this user. */
+  userId: number;
   timeZone: string;
   profile: { birthDate: string; sex: "male" | "female"; maxHr: number; heightCm?: number | null };
 };
@@ -45,11 +50,11 @@ export type Stage1Day = {
   maxHr: number;
   /** Effort 0–100, or null with too little HR. */
   effort: number | null;
-  /** Zones 1–4 (Light, Moderate, Vigorous, Peak): lower bounds (bpm) and seconds. */
+  /** Zones 1–5 on heart-rate reserve: lower bounds (bpm) and seconds. */
   zoneLower: number[];
   zoneSeconds: number[];
-  /** "google": the day's zones from Google; "max_hr": Pulse's % of max HR fallback. */
-  zoneSource: "google" | "max_hr";
+  /** Seconds below Zone 1 ("Zone 0"); absent on days stored before version 9. */
+  zoneBelowSeconds?: number;
   /** Stress Monitor's resting daytime HR for the day (independent of the baseline). */
   dayAggregate: number | null;
   stillMinutes: number;
@@ -63,6 +68,7 @@ export type Stage1Activity = {
   avgHr: number | null;
   maxHr: number | null;
   zoneSeconds: number[];
+  zoneBelowSeconds?: number;
   hrr: HrRecoveryResult | null;
 };
 

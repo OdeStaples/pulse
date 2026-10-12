@@ -31,14 +31,20 @@ function isDay(raw: string) {
   return isValid(date) && iso(date) === raw; // rejects 2026-02-31
 }
 
+/** How far back `?d=` may go. Pages build a day strip from `d` to today, so this bounds it (~3,650 tiles). */
+export const MAX_PAST_DAYS = 3650;
+
+/** A real day no later than today and no more than MAX_PAST_DAYS before it. */
+export const inDayRange = (v: string, today: string) => isDay(v) && v <= today && v >= addDays(today, -MAX_PAST_DAYS);
+
 /**
- * Reads `?d=`. Missing → today. Unparsable or future → today with `rejected: true`, so the page can
- * replace the URL without `d`.
+ * Reads `?d=`. Missing → today. Unparsable, future or older than MAX_PAST_DAYS → today with `rejected: true`, so
+ * the page can replace the URL without `d`.
  */
 export function parseDay(raw: string | string[] | undefined, today: string) {
   const v = Array.isArray(raw) ? raw[0] : raw;
   if (v === undefined || v === "") return { d: today, isToday: true, rejected: false };
-  if (!isDay(v) || v > today) return { d: today, isToday: true, rejected: true };
+  if (!inDayRange(v, today)) return { d: today, isToday: true, rejected: true };
   return { d: v, isToday: v === today, rejected: false };
 }
 
@@ -71,6 +77,23 @@ export function dayHref(href: string, d: string, today: string) {
   const q = withParam(query, "d", d === today ? null : d);
   return `${path}${q}${hash ? `#${hash}` : ""}`;
 }
+
+/** A metric's own detail screen (Steps, Distance, Weight, …): `/metric/steps`. */
+export const metricHref = (key: string) => `/metric/${key}`;
+
+/** A Trend View `/trend/[key]` (spec §11 R29), keeping the day and, when set, the range and period offset. */
+export function trendHref(key: string, o: { d?: string; today?: string; r?: string; p?: number } = {}) {
+  const q = new URLSearchParams();
+  if (o.d && o.d !== o.today) q.set("d", o.d);
+  if (o.r) q.set("r", o.r);
+  if (o.p) q.set("p", String(o.p));
+  return `/trend/${key}${q.size ? `?${q}` : ""}`;
+}
+
+/** `/activity/[id]`. Google's ids are resource names with slashes (`users/…/dataPoints/…`), so the id is encoded. */
+export const activityHref = (id: string) => `/activity/${encodeURIComponent(id)}`;
+/** `/sleep/nap/[id]`, encoded like activityHref. */
+export const napHref = (id: string) => `/sleep/nap/${encodeURIComponent(id)}`;
 
 // --- Navigation structure (spec §4.2, §4.5) ---
 

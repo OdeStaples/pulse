@@ -1,8 +1,9 @@
 "use client"
 
-import { ComposedChart, Line, ReferenceDot, ReferenceLine, XAxis, YAxis } from "recharts"
+import * as React from "react"
+import { Area, CartesianGrid, ComposedChart, Line, ReferenceDot, ReferenceLine, XAxis, YAxis } from "recharts"
 import { DATA_COLORS, STRESS_COLOR, STRESS_WORD, stressLevel } from "@/lib/bands"
-import { hourTicks, splitByBand } from "@/lib/charts"
+import { bandColor, hourTicks } from "@/lib/charts"
 import { clock, formatValue } from "@/lib/format"
 import type { Metric } from "@/lib/reasons"
 import { ChartTooltip, ChartTooltipContent } from "@/components/ui/chart"
@@ -11,7 +12,7 @@ import { EmptyState } from "@/components/shells/EmptyState"
 import { MetricState } from "@/components/shells/MetricState"
 import { useOptionalShellCalendar } from "@/components/shells/ShellStatus"
 import { ReasonPlaceholder } from "@/components/metrics/ReasonPlaceholder"
-import { AXIS, ChartFigure, LINE_CURSOR, TOOLTIP_CLASS, TooltipLine, useSeriesAnimation } from "./ChartFrame"
+import { AXIS, BandGradient, bandPaint, ChartFigure, FadeGradient, GlowDot, GRID, LINE_CURSOR, TOOLTIP_CLASS, TooltipLine, useSeriesAnimation, type Band } from "./ChartFrame"
 import { spanAreas, type ChartSpan } from "./IntradayHrChart"
 
 export type StressSeries = {
@@ -28,13 +29,17 @@ export type StressChartProps = {
   variant: "full" | "spark"
 }
 
-const STROKES = (["low", "medium", "high"] as const).map((l) => DATA_COLORS[STRESS_COLOR[l]].css)
+// Low from 0, medium from 1, high from 2: one continuous line whose colour follows the level (Bevel's stress chart).
+const BANDS: Band[] = (["low", "medium", "high"] as const).map((l, i) => ({ from: i, color: DATA_COLORS[STRESS_COLOR[l]].css }))
 
 function Chart({ s, variant }: { s: StressSeries; variant: "full" | "spark" }) {
   const tz = useOptionalShellCalendar()?.timeZone
   const anim = useSeriesAnimation()
-  const { rows, keys } = splitByBand(s.points.map((p) => ({ x: p.t, y: p.value })), [1, 2])
-  const data = rows.map((r, i) => ({ ...r, all: s.points[i].value }))
+  const id = React.useId().replace(/:/g, "")
+  const data = s.points.map((p) => ({ x: p.t, all: p.value }))
+  const vals = s.points.flatMap((p) => (p.value === null ? [] : [p.value]))
+  const top = Math.max(...vals)
+  const bottom = Math.min(...vals)
   const first = s.points[0]?.t ?? 0
   const last = s.now ?? s.points.at(-1)?.t ?? 0
   const latest = [...s.points].reverse().find((p) => p.value !== null)
@@ -42,23 +47,27 @@ function Chart({ s, variant }: { s: StressSeries; variant: "full" | "spark" }) {
   const summary = latest?.value != null
     ? `Stress through the day, latest ${formatValue("decimal1", latest.value)}, ${STRESS_WORD[stressLevel(latest.value)].toLowerCase()}, at ${clock(latest.t, tz)}.`
     : "Stress through the day."
-  const latestColor = latest?.value != null ? DATA_COLORS[STRESS_COLOR[stressLevel(latest.value)]].css : undefined
 
   return (
     <ChartFigure summary={summary} config={{ all: { label: "Stress", color: "var(--stress-medium)" } }} className={full ? "h-[200px]" : "h-11"}>
       <ComposedChart data={data} accessibilityLayer={full} margin={full ? { top: 16, right: 8, bottom: 0, left: 0 } : { top: 4, right: 4, bottom: 4, left: 4 }}>
-        {full && <ReferenceLine y={1} stroke="var(--chart-grid)" />}
-        {full && <ReferenceLine y={2} stroke="var(--chart-grid)" />}
-        {full && spanAreas(s.spans)}
+        <defs>
+          <BandGradient id={`stress-${id}`} top={top} bottom={bottom} bands={BANDS} />
+          <FadeGradient id={`stress-fill-${id}`} color={bandColor(top, BANDS)} from={0.22} />
+        </defs>
+        {full && <CartesianGrid {...GRID} horizontalValues={[1, 2, 3]} />}
+        {full && spanAreas(s.spans, true)}
         <XAxis
           dataKey="x"
           type="number"
           scale="time"
           domain={[first, last]}
           hide={!full}
-          ticks={full ? hourTicks(first, last, 4, tz) : undefined}
+          // The hours, then the time now in bold at the end of the line (dashboard-08), clear of the last hour.
+          ticks={full ? (s.now ? [...hourTicks(first, last, 6, tz).filter((t) => last - t >= 5 * 3_600_000), s.now] : hourTicks(first, last, 4, tz)) : undefined}
           tickFormatter={(v: number) => clock(v, tz)}
-          interval="equidistantPreserveStart"
+          tick={full && s.now ? (p: { x?: number | string; y?: number | string; payload?: { value: number } }) => <NowTick {...p} first={first} now={s.now!} tz={tz} /> : undefined}
+          interval={s.now ? 0 : "equidistantPreserveStart"}
           minTickGap={24}
           {...AXIS}
         />
@@ -85,14 +94,35 @@ function Chart({ s, variant }: { s: StressSeries; variant: "full" | "spark" }) {
             }
           />
         )}
-        <Line dataKey="all" stroke="none" dot={false} activeDot={false} connectNulls={false} isAnimationActive={false} />
-        {keys.map((k, i) => (
-          <Line key={k} dataKey={k} type="monotone" stroke={STROKES[i]} strokeWidth={full ? 2 : 1.5} dot={false} activeDot={false} connectNulls={false} tooltipType="none" {...anim} />
-        ))}
+        {full && <Area dataKey="all" type="monotone" stroke="none" fill={top > 0 ? `url(#stress-fill-${id})` : "none"} connectNulls={false} activeDot={false} tooltipType="none" {...anim} />}
+        <Line
+          dataKey="all"
+          type="monotone"
+          stroke={bandPaint(`stress-${id}`, top, bottom, BANDS)}
+          strokeWidth={full ? 2 : 1.5}
+          dot={false}
+          activeDot={full ? (d: { cx?: number; cy?: number; payload?: { all: number | null } }) => <GlowDot cx={d.cx} cy={d.cy} fill={bandPaint("", d.payload?.all ?? 0, d.payload?.all ?? 0, BANDS)} /> : false}
+          connectNulls={false}
+          {...anim}
+        />
         {full && s.now && <ReferenceLine x={s.now} stroke="var(--chart-cursor)" strokeDasharray="4 4" ifOverflow="hidden" />}
-        {latest?.value != null && <ReferenceDot x={latest.t} y={latest.value} r={full ? 4 : 3} fill={latestColor} stroke="none" />}
+        {/* The latest reading: a white dot, as the reference app ends its line (health-01, dashboard-08). */}
+        {latest?.value != null && <ReferenceDot x={latest.t} y={latest.value} r={full ? 4 : 3} fill="var(--foreground)" stroke="none" />}
       </ComposedChart>
     </ChartFigure>
+  )
+}
+
+/** An hour tick, or the time now in bold. */
+function NowTick({ x, y, payload, first, now, tz }: { x?: number | string; y?: number | string; payload?: { value: number }; first: number; now: number; tz?: string }) {
+  if (!payload) return null
+  const isNow = payload.value === now
+  // The first tick sits on the axis's left edge: anchored at its start so it isn't cut off.
+  const anchor = isNow ? "end" : payload.value <= first ? "start" : "middle"
+  return (
+    <text x={x} y={y} dy="0.9em" textAnchor={anchor} fontSize={12} fontWeight={isNow ? 700 : 400} fill={isNow ? "var(--foreground)" : "var(--muted-foreground)"} className="font-numeric tabular-nums">
+      {clock(payload.value, tz)}
+    </text>
   )
 }
 
@@ -100,7 +130,7 @@ function Chart({ s, variant }: { s: StressSeries; variant: "full" | "spark" }) {
 export function StressChart({ data, variant }: StressChartProps) {
   const empty =
     variant === "full" ? (
-      <div className="grid h-[200px] place-items-center">
+      <div className="grid place-items-center">
         <EmptyState body="No still minutes to score yet today. Stress is measured only while you are not moving." />
       </div>
     ) : (
@@ -114,7 +144,7 @@ export function StressChart({ data, variant }: StressChartProps) {
       reasonSize={variant === "full" ? "md" : "sm"}
       renderReason={(r) =>
         variant === "full" ? (
-          <div className="grid h-[200px] place-items-center">
+          <div className="grid place-items-center">
             <ReasonPlaceholder reason={r} size="md" />
           </div>
         ) : (

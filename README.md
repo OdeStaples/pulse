@@ -1,6 +1,6 @@
 # Pulse
 
-A personal recovery, strain and sleep app for the Fitbit Air: one Next.js app (frontend, sync worker and scoring) on SQLite.
+A personal recovery, strain and sleep app for the Fitbit Air: one Next.js app (frontend, sync worker and scoring) on Postgres. The server's admins invite people (or open sign-up); each person connects their own Google account and sees only their own data.
 See `docs/plans/` for the plan.
 
 ## Screenshots
@@ -11,17 +11,15 @@ See `docs/plans/` for the plan.
   <img src="docs/screenshots/phone-journal.png" alt="Pulse on a phone: the Journal with the Log" width="32%">
 </p>
 
-![Pulse on a laptop: the home screen](docs/screenshots/laptop-home.png)
-
 Every screen, on a phone and a laptop: [docs/screenshots.md](docs/screenshots.md) (demo mode, seeded data).
 
 ## Run in demo mode
 
-Demo mode generates deterministic data into `data/demo.db`, so no Google account is needed.
+Demo mode generates deterministic data for a shared demo user, so no Google account is needed. Start Postgres first: `docker compose -f compose.dev.yaml up -d`.
 
 ```sh
 pnpm install
-cp .env.example .env   # GOOGLE_OAUTH_ENABLED=false is already set
+cp .env.example .env   # DATA_SOURCE=demo is already set
 pnpm dev               # http://localhost:3000, health check at /healthz
 ```
 
@@ -31,12 +29,18 @@ The database is created and migrated on boot, and the sync worker starts once (`
 
 Every variable is listed and explained in [`.env.example`](.env.example). It is validated at startup, and the server exits on invalid config.
 
-- `GOOGLE_OAUTH_ENABLED=true` switches to the Google Health API and `data/pulse.db`. It needs `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`, and the sign-in screen becomes "Sign in with Google". Set `OWNER_EMAIL` so only your account gets in.
+- `DATA_SOURCE=google` switches to real data from the Google Health API. It needs `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` and `BETTER_AUTH_SECRET`. People sign up with a name, username, email and password (better-auth), sign in with the username or the email, and connect their own Google account from inside Pulse. Sign-up is invite-only by default: set `ADMIN_EMAILS` to your email, create your account, then invite people from the admin dashboard at `/admin` ([admin guide](docs/admin.md#invite-people)).
 - The first sign-in asks for your birth date and sex (onboarding). Settings › Profile edits them.
+
+## Install as an app
+
+Pulse is a PWA: install it from Chrome on Android, Add to Home Screen on iPhone, or wrap it into an Android APK with
+PWABuilder. Notifications, the offline page, launch screens and how to rebrand the icons for a fork are in
+[docs/pwa.md](docs/pwa.md).
 
 ## Deploy
 
-Pulse runs as one Docker container with its database in a volume, behind a tunnel or HTTPS reverse proxy. The [setup guide](docs/setup.md) covers Google Cloud, Docker, HTTPS, backups and troubleshooting.
+Pulse runs as one Docker container with its database in a volume, behind a tunnel or HTTPS reverse proxy. The [setup guide](docs/setup.md) covers Google Cloud, Docker, HTTPS over Tailscale and troubleshooting; [other setups](docs/other-setups.md) covers Cloudflare Tunnel and reverse proxies; the [admin guide](docs/admin.md) covers invites, the coach, updates and backups.
 
 ## Commands
 
@@ -49,10 +53,12 @@ Pulse runs as one Docker container with its database in a volume, behind a tunne
 | `pnpm test` / `pnpm test:watch` | Vitest (Node for `*.test.ts`, happy-dom for `*.test.tsx`) |
 | `pnpm e2e` | Playwright |
 | `pnpm db:generate` | Generates a migration in `drizzle/` from `src/server/db/schema.ts` |
+| `pnpm pwa:assets` | Regenerates the app icons, shortcut icons and iOS launch screens ([docs/pwa.md](docs/pwa.md#rebrand-it-for-your-fork)) |
 
 ## Contributing and security
 
 - [Setup guide](docs/setup.md): from the demo to your own data on a server.
+- [Installed app (PWA)](docs/pwa.md): install, notifications, offline, rebranding, Android APK.
 - [Contributing](CONTRIBUTING.md): how changes land (`main` is protected; every change is a pull request).
 - [Security policy](SECURITY.md): report vulnerabilities privately.
 - [Code of Conduct](CODE_OF_CONDUCT.md).

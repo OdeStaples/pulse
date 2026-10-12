@@ -9,7 +9,7 @@ export type HomeInsightItem = { key: string; title: string; body: string }
 
 /**
  * Home's coach card [latest-home-top-1], [latest-home-top-3]: an opaque card with a title and body (no link: the reference app,
- * another app and Baro keep the coach card text-only; U16 decision 2026-10-03),
+ * other apps keep the coach card text-only; U16 decision 2026-10-03),
  * and the reference app's check-over-count pill at the right. With several cards a second card peeks out underneath
  * and the pill cycles through them (the reference app swipes; tap to cycle is inferred, spec §12 I13). Every card sits
  * in the same grid cell, so the box keeps the tallest card's height and nothing below moves on a cycle.
@@ -47,13 +47,13 @@ export function HomeInsight({ items }: { items: HomeInsightItem[] }) {
             type="button"
             onClick={() => setI((k) => (k + 1) % n)}
             aria-label={`Next insight (${i + 1} of ${n})`}
-            className="absolute top-2 right-2 flex h-12 w-6 flex-col items-center justify-center gap-1 rounded-lg bg-white/8 text-foreground transition-[background-color,scale] duration-150 ease-standard outline-none after:absolute after:-inset-x-2.5 after:-inset-y-0.5 hover:bg-white/12 focus-visible:ring-3 focus-visible:ring-ring/50 active:scale-[0.96]"
+            className="absolute top-2 right-2 flex h-12 w-6 flex-col items-center justify-center gap-1 rounded-lg bg-foreground/8 text-foreground transition-[background-color,scale] duration-150 ease-standard outline-none after:absolute after:-inset-x-2.5 after:-inset-y-0.5 hover:bg-foreground/12 focus-visible:ring-3 focus-visible:ring-ring/50 active:scale-[0.96]"
           >
             <Check aria-hidden className="size-4" strokeWidth={2.25} />
             <span className="font-numeric text-[13px] leading-4 font-semibold text-foreground-secondary tabular-nums">{n - i}</span>
           </button>
         ) : (
-          <span aria-hidden className="absolute top-2 right-2 flex h-12 w-6 flex-col items-center justify-center gap-1 rounded-lg bg-white/8">
+          <span aria-hidden className="absolute top-2 right-2 flex h-12 w-6 flex-col items-center justify-center gap-1 rounded-lg bg-foreground/8">
             <Check className="size-4" strokeWidth={2.25} />
             <span className="font-numeric text-[13px] leading-4 font-semibold text-foreground-secondary tabular-nums">1</span>
           </span>

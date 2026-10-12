@@ -19,6 +19,10 @@ export type ShellStatus = {
   streak?: { days: number; asOf: string } | null
   /** The avatar photo (src/server/avatar.ts); null draws the outline person icon. */
   avatar?: string | null
+  /** This user may use the coach: the round P action opens it instead of the check-in. */
+  coach?: boolean
+  /** The signed-in account. The offline check-in queue is kept per account, so it never replays into another one. */
+  userId?: number
 }
 
 const Ctx = React.createContext<ShellStatus | null>(null)
@@ -26,6 +30,8 @@ const Ctx = React.createContext<ShellStatus | null>(null)
 /** The calendar facts most components need: they change once a day, not on every sync. */
 export type ShellCalendar = Pick<ShellStatus, "today" | "firstDay" | "timeZone">
 const CalendarCtx = React.createContext<ShellCalendar | null>(null)
+/** AppLifecycle's resume check (see useShellRecheck). */
+const RecheckCtx = React.createContext<(() => Promise<void>) | null>(null)
 
 /** How often the client asks `/status` while a sync or import runs. */
 export const STATUS_POLL_MS = 2000
@@ -43,8 +49,11 @@ const busy = (s: ShellStatus) => s.sync.state === "syncing" || s.connection === 
 export function ShellStatusProvider({ value, live = false, children }: { value: ShellStatus; live?: boolean; children: React.ReactNode }) {
   const router = useRouter()
   const [polled, setPolled] = React.useState<{ from: ShellStatus; status: ShellStatus } | null>(null)
-  // A new server render (navigation, refresh) supersedes what polling saw. Avatar only comes from the layout.
-  const current = polled?.from === value ? { ...polled.status, avatar: value.avatar } : value
+  // A new server render (navigation, refresh) supersedes what polling saw. Avatar, coach and userId only come from the layout.
+  const current = React.useMemo(
+    () => (polled?.from === value ? { ...polled.status, avatar: value.avatar, coach: value.coach, userId: value.userId } : value),
+    [polled, value],
+  )
   // Only the real app polls: a fixture that says "syncing" would poll, refresh and say "syncing" again, forever.
   const running = live && busy(current)
   React.useEffect(() => {
@@ -68,6 +77,22 @@ export function ShellStatusProvider({ value, live = false, children }: { value: 
     }
   }, [running, value, router])
 
+  // A resumed app asks the server where things stand (the route also kicks the worker). New scores landed while it
+  // was away, or a new day: re-render the screens. A sync now running: the polling above takes over and refreshes
+  // when it ends. Nothing new: no request beyond this one, and no re-render of every chart.
+  const recheck = React.useCallback(async () => {
+    if (!live) return
+    try {
+      const res = await fetch("/status", { cache: "no-store" })
+      if (!res.ok) return
+      const next = (await res.json()) as ShellStatus
+      setPolled({ from: value, status: next })
+      if (next.sync.lastSuccessAt !== current.sync.lastSuccessAt || next.today !== current.today) router.refresh()
+    } catch {
+      // Offline or signed out: the next resume or navigation tries again.
+    }
+  }, [live, value, current, router])
+
   const { today, firstDay, timeZone } = current
   const calendar = React.useMemo(() => ({ today, firstDay, timeZone }), [today, firstDay, timeZone])
   const key = JSON.stringify(current)
@@ -75,7 +100,9 @@ export function ShellStatusProvider({ value, live = false, children }: { value: 
   const status = React.useMemo(() => current, [key])
   return (
     <CalendarCtx.Provider value={calendar}>
-      <Ctx.Provider value={status}>{children}</Ctx.Provider>
+      <RecheckCtx.Provider value={recheck}>
+        <Ctx.Provider value={status}>{children}</Ctx.Provider>
+      </RecheckCtx.Provider>
     </CalendarCtx.Provider>
   )
 }
@@ -99,3 +126,10 @@ export function useShellCalendar() {
 
 /** Like useShellCalendar, for kit components that also render outside a shell (tests, gallery). */
 export const useOptionalShellCalendar = () => React.useContext(CalendarCtx)
+
+/** The resume check: one `/status` request, and a refresh only when the server has something new. */
+export function useShellRecheck() {
+  const v = React.useContext(RecheckCtx)
+  if (!v) throw new Error("useShellRecheck must be used inside AppShell")
+  return v
+}

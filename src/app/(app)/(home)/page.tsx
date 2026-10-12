@@ -1,57 +1,60 @@
 import Link from "next/link"
-import { CalendarRange, Check, ChevronRight, CircleAlert, Lightbulb, Maximize2, Moon, Plus, Sun, TriangleAlert } from "lucide-react"
+import { CalendarRange, Check, ChevronRight, CircleAlert, Info, Lightbulb, Maximize2, Moon, Plus, Sun, Timer, TriangleAlert } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { isDashboardKey } from "@/lib/dashboard"
+import { FEATURES } from "@/lib/features"
 import { clock, DAY, formatDay, formatValue, MISSING, rangeLabel } from "@/lib/format"
 import { reasonCopy } from "@/lib/reasons"
-import { dayHref } from "@/lib/url"
+import { dayHref, activityHref, napHref } from "@/lib/url"
 import { Wordmark } from "@/components/brand/Wordmark"
 import { EnergyBankChart } from "@/components/charts/EnergyBankChart"
 import { StrainRecoveryChart } from "@/components/charts/StrainRecoveryChart"
+import { StressChart } from "@/components/charts/StressChart"
 import { ActivityCard } from "@/components/metrics/ActivityCard"
 import { KeyStatRow } from "@/components/metrics/KeyStatRow"
 import { ReasonPlaceholder } from "@/components/metrics/ReasonPlaceholder"
 import { ScoreDial } from "@/components/metrics/ScoreDial"
 import { SleepCard } from "@/components/metrics/SleepCard"
 import { TickScale } from "@/components/metrics/TickScale"
-import { MetricTags } from "@/components/metrics/primitives"
+import { CARD_BUTTON, MetricTags } from "@/components/metrics/primitives"
 import { EmptyState } from "@/components/shells/EmptyState"
 import { InfoCardTrigger } from "@/components/shells/InfoButton"
 import { HEADER_SENTINEL, HOME_DIALS, HOME_DIALS_CLASS } from "@/lib/header-state"
 import { MetricState } from "@/components/shells/MetricState"
 import { PageShell } from "@/components/shells/PageShell"
 import { SectionShell } from "@/components/shells/SectionShell"
+import { SheetTrigger } from "@/components/shells/SheetTrigger"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { CARD_MATERIAL } from "@/components/ui/card"
 import { getHome } from "@/server/queries/home"
 import type { HomeVM, KeyStat, StressLevel } from "@/server/queries/types"
 import { pageDay, type SearchParams } from "../_lib/day"
 import { EditDashboard } from "../_lib/EditDashboard"
+import { MyPlan } from "../_lib/MyPlan"
+import { PlusMenu } from "../_lib/PlusMenu"
 import { HomeInsight } from "../_lib/HomeInsight"
+import { AddActivityTrigger } from "../_lib/AddActivity"
 import { ENERGY_INFO, STRAIN_RECOVERY_INFO, TONIGHT_INFO } from "../_lib/info"
 import { TonightPlan } from "../_lib/TonightPlan"
-import { CAPTION, energySeries, LABEL, statProps } from "../_lib/view"
+import { CAPTION, energySeries, LABEL, statProps, stressSeries } from "../_lib/view"
 
 export const metadata = { title: "Today", description: "Today’s Sleep, Recovery and Strain at a glance." }
 
 const STRESS_TONE: Record<StressLevel, { chip: string; text: string; word: string }> = {
-  low: { chip: "bg-stress-low/15 text-stress-low", text: "text-stress-low", word: "Low" },
-  medium: { chip: "bg-stress-medium/15 text-stress-medium", text: "text-stress-medium", word: "Medium" },
-  high: { chip: "bg-stress-high/15 text-stress-high", text: "text-stress-high", word: "High" },
+  low: { chip: "bg-stress-low/15 text-stress-low-text", text: "text-stress-low-text", word: "Low" },
+  medium: { chip: "bg-stress-medium/15 text-stress-medium-text", text: "text-stress-medium-text", word: "Medium" },
+  high: { chip: "bg-stress-high/15 text-stress-high-text", text: "text-stress-high-text", word: "High" },
 }
 const CHIP_BOX = "grid h-7 min-w-7 shrink-0 place-items-center rounded-md px-1"
-/** The 48 px secondary button at a card's foot ("+ Add activity", "Behaviour insights") [latest-home-collapsed-1]. */
-const CARD_BUTTON =
-  "mt-3 flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-secondary text-[13px] leading-4 font-bold tracking-[0.08em] uppercase transition-[background-color,scale] duration-150 ease-standard outline-none hover:bg-accent focus-visible:ring-3 focus-visible:ring-ring/50 active:scale-[0.96]"
 /** The 56 px gradient banner rows: day outlook / review and week in review (spec §7.1 7a, 10). */
 const BANNER =
   "flex h-14 w-full items-center gap-3 rounded-2xl px-4 text-left shadow-card transition-[filter,scale] duration-150 ease-standard outline-none hover:brightness-110 focus-visible:ring-3 focus-visible:ring-ring/50 active:scale-[0.96]"
-const ADD_ACTIVITY_INFO = {
-  title: "Add an activity",
+const NO_BAND_INFO = {
+  title: "No band data yet",
   body: (
     <>
-      <p>Pulse reads your workouts from Fitbit through Google Health, so it cannot add one here.</p>
-      <p>Start or log the workout in the Fitbit app. It appears in your activities after the next sync, with its Strain.</p>
+      <p>Sleep, Recovery and Strain are scored from your Fitbit’s heart rate, which your phone can’t measure.</p>
+      <p>Until your Fitbit syncs, Home shows what your phone counts: steps, distance, calories and active minutes.</p>
     </>
   ),
 }
@@ -60,11 +63,11 @@ const ICON_LINK =
 
 /** Home `/` (spec §7.1). */
 export default async function HomePage({ searchParams }: PageProps<"/">) {
-  const { d, today, timeZone } = await pageDay(searchParams as SearchParams, "/")
-  const vm = getHome(d)
+  const { d, today, timeZone, ctx } = await pageDay(searchParams as SearchParams, "/")
+  const vm = await getHome(d, ctx)
   const at = (href: string) => dayHref(href, d, today)
   const { dials } = vm
-  const checkIn = `${at("/journal")}${vm.isToday ? "?" : "&"}checkin=1`
+  const startActivity = FEATURES.startActivity && vm.isToday
 
   return (
     <PageShell
@@ -113,20 +116,32 @@ export default async function HomePage({ searchParams }: PageProps<"/">) {
                 {/* The sentinel above pulls the stack up to the labels; give the note its own 12 px back. */}
                 {dials.reason && (
                   <p className="pt-3 text-center md:pt-4">
-                    <ReasonPlaceholder
-                      reason={dials.reason.reason}
-                      nightsLeft={dials.reason.nightsLeft}
-                      size="sm"
-                      // Phone data but no band: say what the dials need, not just that the band was off (§11 CD2).
-                      copy={vm.phone ? "No band data: Sleep, Recovery and Strain need your Fitbit" : undefined}
-                    />
+                    {vm.phone ? (
+                      // Phone data but no band: one short line, the reason in its info card (§11 CD2, MD2).
+                      <InfoCardTrigger
+                        info={NO_BAND_INFO}
+                        className="relative inline-flex items-center gap-1.5 rounded-md whitespace-nowrap outline-none after:absolute after:-inset-x-2 after:-inset-y-3 hover:[&>*]:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
+                      >
+                        <ReasonPlaceholder reason={dials.reason.reason} size="sm" copy="No band data yet" className="transition-[color] duration-150 ease-standard" />
+                        <Info aria-hidden className="size-3.5 shrink-0 text-muted-foreground transition-[color] duration-150 ease-standard" strokeWidth={1.75} />
+                      </InfoCardTrigger>
+                    ) : (
+                      <ReasonPlaceholder reason={dials.reason.reason} nightsLeft={dials.reason.nightsLeft} size="sm" />
+                    )}
                   </p>
                 )}
               </div>
               {vm.phone && (
                 // Leads where the monitor cards sit: with no band they would only say "No readings" (§11 CD2).
                 <div className="xl:col-start-2 xl:row-start-1">
-                  <PhoneActivity stats={vm.phone} isToday={vm.isToday} link={{ d, today }} />
+                  <PhoneActivity stats={vm.phone} link={{ d, today }} />
+                </div>
+              )}
+              {/* Dials, then the monitor cards, as in the reference app (home-01); the coach card and an alert follow them. */}
+              {!vm.phone && (
+                <div className="grid grid-cols-2 gap-3 xl:col-start-2 xl:row-start-1 xl:grid-cols-1 xl:gap-4">
+                  <MonitorCard vm={vm} href={at("/health/monitor")} />
+                  <StressCard vm={vm} href={at("/health/stress")} timeZone={timeZone} />
                 </div>
               )}
               {vm.insights.length > 0 && (
@@ -139,12 +154,6 @@ export default async function HomePage({ searchParams }: PageProps<"/">) {
                   <MonitorAlert alert={vm.monitorAlert} href={at("/health/monitor")} />
                 </div>
               )}
-              {!vm.phone && (
-                <div className="grid grid-cols-2 gap-3 xl:col-start-2 xl:row-start-1 xl:grid-cols-1 xl:gap-4">
-                  <MonitorCard vm={vm} href={at("/health/monitor")} />
-                  <StressCard vm={vm} href={at("/health/stress")} timeZone={timeZone} />
-                </div>
-              )}
             </div>
           </div>
         ),
@@ -155,17 +164,8 @@ export default async function HomePage({ searchParams }: PageProps<"/">) {
             variant="section"
             title="My Day"
             className="xl:flex xl:h-full xl:flex-col"
-            action={
-              <Link
-                href={checkIn}
-                aria-label="Add to today"
-                // the reference app's "+" is a ~34 pt white tile with a soft top-light, centred on the title, about 15 pt above
-                // the first card [latest-home-collapsed-1]; the hit area grows to 44 px without moving it.
-                className="relative grid size-[34px] place-items-center rounded-[10px] bg-linear-to-b from-white to-zinc-200 text-primary-foreground shadow-sm transition-[scale,filter] duration-150 ease-standard outline-none after:absolute after:-inset-[5px] hover:brightness-95 focus-visible:ring-3 focus-visible:ring-ring/50 active:scale-[0.96]"
-              >
-                <Plus aria-hidden className="size-5" strokeWidth={2.25} />
-              </Link>
-            }
+            // The action menu for the day on screen: add an activity, complete the journal (the reference app, home-08).
+            action={<PlusMenu label={vm.isToday ? "Add to today" : `Add to ${formatDay(d, DAY.short)}`} />}
           >
             <div className="flex flex-col gap-3 xl:flex-1 xl:gap-4">
               {vm.outlook && <DayBanner outlook={vm.outlook} />}
@@ -173,7 +173,7 @@ export default async function HomePage({ searchParams }: PageProps<"/">) {
                 variant="card"
                 title={vm.activities.title}
                 action={
-                  <Link href={at("/strain")} aria-label="Open Strain" className={ICON_LINK}>
+                  <Link href="/activities" aria-label="All activities" className={ICON_LINK}>
                     <Maximize2 aria-hidden className="size-[18px]" strokeWidth={1.75} />
                   </Link>
                 }
@@ -182,32 +182,41 @@ export default async function HomePage({ searchParams }: PageProps<"/">) {
                   <div className="space-y-1.5">
                     {vm.activities.items.map((it) =>
                       it.kind === "activity" ? (
-                        <ActivityCard key={it.id} name={it.name} kind={it.activityKind} strain={it.strain} start={it.start} end={it.end} distanceKm={it.distanceKm} paceS={it.paceS} href={`/activity/${it.id}`} timeZone={timeZone} />
+                        <ActivityCard key={it.id} name={it.name} kind={it.activityKind} strain={it.strain} start={it.start} end={it.end} distanceKm={it.distanceKm} paceS={it.paceS} href={activityHref(it.id)} timeZone={timeZone} />
                       ) : (
-                        <SleepCard key={it.id} kind={it.kind} minutes={it.minutes} start={it.start} end={it.end} href={at("/sleep")} timeZone={timeZone} />
+                        <SleepCard key={it.id} kind={it.kind} minutes={it.minutes} start={it.start} end={it.end} href={it.kind === "nap" ? napHref(it.id) : at("/sleep")} timeZone={timeZone} />
                       ),
                     )}
                   </div>
                 ) : (
                   <EmptyState body={vm.isToday ? "No activities yet today. Workouts appear after Fitbit syncs them." : "No activities on this day."} />
                 )}
-                {vm.isToday && (
-                  // the reference app's "+ Add activity" [latest-home-collapsed-1]. Pulse imports workouts, so it explains where they come from (§11 R2).
-                  <InfoCardTrigger info={ADD_ACTIVITY_INFO} className={CARD_BUTTON}>
+                {/* the reference app's "+ Add activity", on past days too, beside "Start activity" today (home-01, home-03).
+                    Pulse imports workouts, so Add explains where they come from (§11 R2); Start needs live recording. */}
+                <div className={cn("mt-3 grid gap-3", startActivity && "grid-cols-2")}>
+                  <AddActivityTrigger className={CARD_BUTTON}>
                     <Plus aria-hidden className="size-5" strokeWidth={2} />
                     Add activity
-                  </InfoCardTrigger>
-                )}
+                  </AddActivityTrigger>
+                  {startActivity && (
+                    <SheetTrigger sheet="start-activity" className={CARD_BUTTON}>
+                      <Timer aria-hidden className="size-5" strokeWidth={2} />
+                      Start activity
+                    </SheetTrigger>
+                  )}
+                </div>
               </SectionShell>
-              <JournalWeek vm={vm} at={at} />
-              {/* Equal heights: each card's footer (Charged / Drained, the goal toggle) sits on the row's bottom line. */}
-              <div className="grid grid-cols-1 gap-3 xl:flex-1 xl:grid-cols-2 xl:gap-4">
-                <EnergyCard vm={vm} timeZone={timeZone} />
+              {/* Phone: Tonight's sleep (today only), then My journal, as in the reference app (home-09, home-03); Energy Bank
+                  is Pulse's own and follows. Laptop: the journal spans the column and the Energy Bank / Tonight's sleep pair
+                  shares the row below with equal heights, each footer on the row's bottom line. */}
+              <div className="grid grid-cols-1 gap-3 xl:flex-1 xl:grid-cols-2 xl:grid-rows-[auto_1fr] xl:gap-4">
+                {vm.isToday && (
                 <SectionShell
                   variant="card"
                   title="Tonight’s sleep"
                   info={TONIGHT_INFO}
                   fill
+                  className="xl:order-last"
                   action={
                     <Link href={at("/sleep#planner")} aria-label="Open Sleep Planner" className={ICON_LINK}>
                       <ChevronRight aria-hidden className="size-[18px]" strokeWidth={1.75} />
@@ -231,24 +240,32 @@ export default async function HomePage({ searchParams }: PageProps<"/">) {
                     {(plan) => <TonightPlan plan={plan} timeZone={timeZone} />}
                   </MetricState>
                 </SectionShell>
+                )}
+                <JournalWeek vm={vm} at={at} className="xl:order-first xl:col-span-2" />
+                <EnergyCard vm={vm} timeZone={timeZone} className={cn(!vm.isToday && "xl:col-span-2")} />
               </div>
             </div>
           </SectionShell>
         ),
         aside: (
+          <div className="space-y-8 xl:flex xl:h-full xl:flex-col xl:space-y-0 xl:gap-8">
+          {FEATURES.myPlan && vm.plan && <MyPlan plan={vm.plan} />}
           <SectionShell
             variant="section"
             title="My Dashboard"
-            aside="vs. 30-day average"
             // the reference app's pencil on the right of the section header opens the metric picker (spec §11 CD1).
-            action={<EditDashboard keys={vm.keyStats.map((s) => s.key).filter(isDashboardKey)} defaults={vm.dashboard.defaults} empty={vm.dashboard.empty} />}
+            action={<EditDashboard keys={vm.keyStats.map((s) => s.key).filter(isDashboardKey)} empty={vm.dashboard.empty} />}
             className="xl:flex xl:h-full xl:flex-col"
           >
             {/* One card per metric (V9, [latest-home-dashboard-1]). */}
             <ul className="space-y-2">
               {vm.keyStats.map((s) => (
                 <li key={s.key}>
-                  <KeyStatRow variant="card" {...statProps(s, { d, today })} />
+                  {s.key === "stress" ? (
+                    <StressTile vm={vm} href={at("/health/stress")} timeZone={timeZone} />
+                  ) : (
+                    <KeyStatRow variant="card" {...statProps(s, { d, today })} />
+                  )}
                 </li>
               ))}
             </ul>
@@ -259,6 +276,7 @@ export default async function HomePage({ searchParams }: PageProps<"/">) {
               </SectionShell>
             )}
           </SectionShell>
+          </div>
         ),
         bottom: vm.weeklyTeaser && (
           <Link href={`/reports/${vm.weeklyTeaser.period}`} className={cn(BANNER, "bg-linear-to-r from-banner-from to-banner-to")}>
@@ -286,17 +304,18 @@ function DayBanner({ outlook }: { outlook: NonNullable<HomeVM["outlook"]> }) {
     >
       <Icon aria-hidden className="size-[22px] shrink-0 text-foreground-secondary" strokeWidth={1.5} />
       <span className="min-w-0 flex-1 truncate text-base leading-[22px] font-semibold">{outlook.title}</span>
-      <ChevronRight aria-hidden className="size-5 shrink-0 text-coach" strokeWidth={1.75} />
+      <ChevronRight aria-hidden className={cn("size-5 shrink-0", review ? "text-coach-text" : "text-outlook-accent")} strokeWidth={1.75} />
     </InfoCardTrigger>
   )
 }
 
 /** "My journal": the week's check-ins as circles, then Behaviour insights [latest-home-collapsed-1]. */
-function JournalWeek({ vm, at }: { vm: HomeVM; at: (href: string) => string }) {
+function JournalWeek({ vm, at, className }: { vm: HomeVM; at: (href: string) => string; className?: string }) {
   return (
     <SectionShell
       variant="card"
       title="My journal"
+      className={className}
       action={
         <Link href={at("/journal")} aria-label="Open Journal" className={ICON_LINK}>
           <ChevronRight aria-hidden className="size-[18px]" strokeWidth={1.75} />
@@ -312,14 +331,14 @@ function JournalWeek({ vm, at }: { vm: HomeVM; at: (href: string) => string }) {
                 href={dayHref("/journal", w.day, vm.today)}
                 aria-label={`${formatDay(w.day, DAY.long)}: ${w.done ? "checked in" : "no check-in"}`}
                 aria-current={current ? "date" : undefined}
-                className="flex min-h-16 flex-col items-center justify-center gap-2 rounded-lg transition-[background-color] duration-150 ease-standard outline-none hover:bg-white/5 focus-visible:ring-3 focus-visible:ring-ring/50 active:bg-accent"
+                className="flex min-h-16 flex-col items-center justify-center gap-2 rounded-lg transition-[background-color] duration-150 ease-standard outline-none hover:bg-foreground/5 focus-visible:ring-3 focus-visible:ring-ring/50 active:bg-accent"
               >
-                <span aria-hidden className={cn("text-xs leading-4 font-bold tracking-[0.08em] uppercase", current ? "text-foreground" : "text-muted-foreground")}>
+                <span aria-hidden className={cn("text-xs leading-4 font-bold tracking-[0.1em] uppercase", current ? "text-foreground" : "text-muted-foreground")}>
                   {formatDay(w.day, { weekday: "short" })}
                 </span>
                 <span
                   aria-hidden
-                  className={cn("grid size-7 place-items-center rounded-full", w.done ? "bg-optimal text-background" : "ring-1 ring-white/25 ring-inset")}
+                  className={cn("grid size-7 place-items-center rounded-full", w.done ? "bg-optimal text-background" : "ring-1 ring-foreground/25 ring-inset")}
                 >
                   {w.done && <Check className="size-4" strokeWidth={3} />}
                 </span>
@@ -328,7 +347,7 @@ function JournalWeek({ vm, at }: { vm: HomeVM; at: (href: string) => string }) {
           )
         })}
       </ol>
-      <Link href="/journal/insights" className={CARD_BUTTON}>
+      <Link href="/journal/insights" className={cn(CARD_BUTTON, "mt-3")}>
         <Lightbulb aria-hidden className="size-5" strokeWidth={2} />
         Behaviour insights
       </Link>
@@ -343,23 +362,23 @@ function MonitorAlert({ alert, href }: { alert: NonNullable<HomeVM["monitorAlert
     <Alert
       className={cn(
         CARD_MATERIAL,
-        "grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-0.5 border-0 px-4 py-3 *:[svg]:size-5 *:[svg]:translate-y-px",
+        "grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-0.5 border-0 px-4 py-3 *:[svg]:size-5! *:[svg]:translate-y-px",
         illness ? "ring-1 ring-recovery-red/60" : "ring-1 ring-warning/50",
       )}
     >
-      {illness ? <CircleAlert className="text-recovery-red-text" strokeWidth={1.75} /> : <TriangleAlert className="text-warning" strokeWidth={1.75} />}
+      {illness ? <CircleAlert className="text-recovery-red-text" strokeWidth={1.75} /> : <TriangleAlert className="text-warning-text" strokeWidth={1.75} />}
       <AlertTitle className="text-base leading-[22px] font-semibold text-balance">
-        {illness ? "Your body may be fighting something" : `${alert.count} vitals outside your normal range`}
+        {illness ? "Your body may be fighting something" : `${alert.count} ${alert.count === 1 ? "vital" : "vitals"} outside your normal range`}
       </AlertTitle>
       <AlertDescription className="col-start-2 space-y-2 text-[15px] leading-[22px] text-pretty text-foreground-secondary md:text-pretty">
         <p>
           {illness
             ? "Several vitals moved away from your normal range together, a pattern that often comes before feeling unwell. Consider an easier day."
-            : `${names} are outside your usual range. This can be an early sign of illness or heavy strain.`}
+            : `${names} ${alert.names.length === 1 ? "is" : "are"} outside your usual range. This can be an early sign of illness or heavy strain.`}
         </p>
         <Link
           href={href}
-          className="relative inline-flex items-center gap-0.5 rounded-md text-xs leading-4 font-bold tracking-[0.08em] text-foreground uppercase no-underline! outline-none after:absolute after:-inset-x-2 after:-inset-y-3.5 hover:text-foreground-secondary focus-visible:ring-3 focus-visible:ring-ring/50"
+          className="relative inline-flex items-center gap-0.5 rounded-md text-xs leading-4 font-bold tracking-[0.1em] text-foreground uppercase no-underline! outline-none after:absolute after:-inset-x-2 after:-inset-y-3.5 hover:text-foreground-secondary focus-visible:ring-3 focus-visible:ring-ring/50"
         >
           View Health Monitor
           <ChevronRight aria-hidden className="size-3.5" strokeWidth={2} />
@@ -373,14 +392,14 @@ function MonitorAlert({ alert, href }: { alert: NonNullable<HomeVM["monitorAlert
  * A day with no band but phone data (spec §11 CD2): the phone's own numbers as Health Monitor tiles, against their
  * 30-day averages, so Home opens on what was recorded instead of three empty dials and "No readings" cards.
  */
-function PhoneActivity({ stats, isToday, link }: { stats: KeyStat[]; isToday: boolean; link: { d: string; today: string } }) {
+function PhoneActivity({ stats, link }: { stats: KeyStat[]; link: { d: string; today: string } }) {
   return (
-    <SectionShell variant="section" title={isToday ? "Today from your phone" : "From your phone"} aside="vs. 30-day average">
+    <SectionShell variant="section" title="From your phone" aside={<span className="whitespace-nowrap">vs. 30-day avg</span>}>
       <ul className="grid grid-cols-2 gap-3 xl:gap-4">
         {stats.map((s, i) => (
-          // An odd count lets the first tile (steps) span the row, so the grid never ends on a hole.
+          // An odd count lets the first tile (steps) span the row as a wide strip that spells out its comparison.
           <li key={s.key} className={cn("grid", stats.length % 2 === 1 && i === 0 && "col-span-2")}>
-            <KeyStatRow variant="tile" {...statProps(s, link)} />
+            <KeyStatRow variant="tile" {...statProps(s, link)} wide={stats.length % 2 === 1 && i === 0} />
           </li>
         ))}
       </ul>
@@ -405,7 +424,7 @@ function MonitorLine({ chip, chipClass, top, topClass, bottom }: { chip: React.R
 function MonitorCard({ vm, href }: { vm: HomeVM; href: string }) {
   const m = vm.monitor
   return (
-    <SectionShell variant="card" title="Health Monitor" href={href} level={2}>
+    <SectionShell variant="card" title="Health Monitor" info={false} href={href} level={2}>
       {m.value === null || m.value.inRange + m.value.flagged === 0 ? (
         // No vital judged yet (no readings, or every baseline still calibrating): never "Within range".
         <MonitorLine
@@ -418,18 +437,18 @@ function MonitorCard({ vm, href }: { vm: HomeVM; href: string }) {
       ) : m.value.flagged === 0 ? (
         <MonitorLine
           chip={<Check aria-hidden className="size-4" strokeWidth={2.5} />}
-          chipClass="bg-optimal/15 text-optimal"
+          chipClass="bg-optimal/15 text-optimal-text"
           top="Within range"
-          topClass="text-optimal"
-          bottom={`${m.value.inRange}/${m.value.total} within range`}
+          topClass="text-optimal-text"
+          bottom={`${m.value.inRange}/${m.value.total} Metrics`}
         />
       ) : (
         <MonitorLine
           chip={<TriangleAlert aria-hidden className="size-4" strokeWidth={2} />}
-          chipClass="bg-warning/15 text-warning"
+          chipClass="bg-warning/15 text-warning-text"
           top="Out of range"
-          topClass="text-warning"
-          bottom={`${m.value.inRange}/${m.value.total} within range`}
+          topClass="text-warning-text"
+          bottom={`${m.value.inRange}/${m.value.total} Metrics`}
         />
       )}
     </SectionShell>
@@ -440,7 +459,7 @@ function StressCard({ vm, href, timeZone }: { vm: HomeVM; href: string; timeZone
   const s = vm.stress
   if (s.value === null)
     return (
-      <SectionShell variant="card" title="Stress Monitor" href={href} level={2}>
+      <SectionShell variant="card" title="Stress Monitor" info={false} href={href} level={2}>
         <MonitorLine
           chip={MISSING}
           chipClass="bg-secondary font-numeric text-base font-bold text-muted-foreground"
@@ -452,7 +471,7 @@ function StressCard({ vm, href, timeZone }: { vm: HomeVM; href: string; timeZone
     )
   const tone = STRESS_TONE[s.value.level]
   return (
-    <SectionShell variant="card" title="Stress Monitor" href={href} level={2}>
+    <SectionShell variant="card" title="Stress Monitor" info={false} href={href} level={2}>
       <MonitorLine
         chip={formatValue("decimal1", s.value.value)}
         chipClass={cn("font-numeric text-lg font-bold tabular-nums", tone.chip)}
@@ -464,10 +483,38 @@ function StressCard({ vm, href, timeZone }: { vm: HomeVM; href: string; timeZone
   )
 }
 
-function EnergyCard({ vm, timeZone }: { vm: HomeVM; timeZone: string }) {
+/** My Dashboard's Stress Monitor tile: the latest level and the day's line (the reference app, dashboard-02). */
+function StressTile({ vm, href, timeZone }: { vm: HomeVM; href: string; timeZone: string }) {
+  const s = vm.stress.value
+  const tone = s && STRESS_TONE[s.level]
+  return (
+    <SectionShell variant="card" title="Stress Monitor" info={false} href={href}>
+      {s && tone && (
+        <div className="-mt-1 mb-3 flex items-baseline justify-between gap-3">
+          <p className={cn(CAPTION, "text-foreground-secondary")}>
+            {s.at !== null ? (
+              <>
+                Last updated <span className="font-numeric tabular-nums">{clock(s.at, timeZone)}</span>
+              </>
+            ) : (
+              "Day average"
+            )}
+          </p>
+          <p className={cn(LABEL, "flex items-baseline gap-1.5", tone.text)}>
+            {tone.word}
+            <span className="font-numeric text-base leading-5 text-foreground tabular-nums">{formatValue("decimal1", s.value)}</span>
+          </p>
+        </div>
+      )}
+      <StressChart variant="full" data={vm.stressChart && stressSeries(vm.stressChart)} />
+    </SectionShell>
+  )
+}
+
+function EnergyCard({ vm, timeZone, className }: { vm: HomeVM; timeZone: string; className?: string }) {
   const e = vm.energyBank
   return (
-    <SectionShell variant="card" title="Energy Bank" info={ENERGY_INFO} aside={e.value && e.provisional ? <MetricTags provisional /> : undefined} fill>
+    <SectionShell variant="card" title="Energy Bank" info={ENERGY_INFO} aside={e.value && e.provisional ? <MetricTags provisional /> : undefined} fill className={className}>
       <MetricState
         metric={e}
         skeleton={null}
@@ -489,8 +536,8 @@ function EnergyCard({ vm, timeZone }: { vm: HomeVM; timeZone: string }) {
             </div>
             <EnergyBankChart data={{ value: energySeries(eb), reason: null, provisional: false }} />
             <div className="mt-auto grid grid-cols-2 gap-3">
-              <MiniStat label="Charged" value={formatValue("signedInt", eb.charged)} className="text-optimal" />
-              <MiniStat label="Drained" value={formatValue("signedInt", eb.drained)} className="text-warning" />
+              <MiniStat label="Charged" value={formatValue("signedInt", eb.charged)} className="text-optimal-text" />
+              <MiniStat label="Drained" value={formatValue("signedInt", eb.drained)} className="text-warning-text" />
             </div>
             {eb.drains.length > 0 && (
               <ul className="space-y-1">

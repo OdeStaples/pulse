@@ -3,11 +3,13 @@ import Base from "../../layouts/Base.astro"
 import BandScale from "../../components/BandScale.astro"
 import Faq from "../../components/Faq.astro"
 import GetStarted from "../../components/GetStarted.astro"
-import Screenshot from "../../components/Screenshot.astro"
+import Device from "../../components/Device.astro"
+import Icon from "../../components/Icon.astro"
 import { METRICS, metricPath, relatedOf, type Metric } from "../../data/metrics"
-import { isPhone } from "../../lib/shots"
+import { isPhone } from "../../lib/screens"
 import { article, breadcrumbs, faqPage } from "../../lib/schema"
-import { ALGORITHMS_DIR, CONTENT_UPDATED } from "../../config"
+import { ALGORITHMS_DIR, CONTENT_UPDATED, SITE_LAUNCHED } from "../../config"
+import FurtherReading from "../../components/FurtherReading.astro"
 
 export function getStaticPaths() {
   return METRICS.map((metric) => ({ params: { slug: metric.slug }, props: { metric } }))
@@ -34,7 +36,7 @@ const spec = SPEC[metric.appSlug]
 const phone = metric.shot && isPhone(metric.shot)
 
 const schema = [
-  article(site, { type: "TechArticle", path, headline: metric.title, description: metric.description, modified: CONTENT_UPDATED }),
+  article(site, { type: "TechArticle", path, headline: metric.title, description: metric.description, published: SITE_LAUNCHED, modified: CONTENT_UPDATED }),
   breadcrumbs(site, [
     { name: "Pulse", path: "/" },
     { name: "Metrics", path: "/metrics/" },
@@ -44,12 +46,12 @@ const schema = [
 ]
 ---
 
-<Base title={metric.title} description={metric.description} schema={schema} ogType="article">
+<Base title={metric.title} description={metric.description} schema={schema} keywords={metric.keywords} ogType="article">
   <article>
     <header class="wrap head" class:list={[{ "with-phone": phone }]}>
       <div class="intro">
         <nav aria-label="Breadcrumb" class="crumbs">
-          <a href="/metrics/">Metrics</a>
+          <a href="/metrics/"><Icon name="chevron-left" class="crumb-icon" stroke={2} />Metrics</a>
         </nav>
         <h1>{metric.name}</h1>
         <p class="lede">{metric.summary}</p>
@@ -61,13 +63,13 @@ const schema = [
           )
         }
       </div>
-      {phone && metric.shot && <Screenshot shot={metric.shot} class="phone-shot" priority sizes="(max-width: 760px) 62vw, 300px" />}
+      {phone && metric.shot && <Device shot={metric.shot} class="phone-shot" />}
     </header>
 
     {
       metric.shot && !phone && (
-        <div class="wrap laptop">
-          <Screenshot shot={metric.shot} priority />
+        <div class="wrap laptop-wrap">
+          <Device shot={metric.shot} />
         </div>
       )
     }
@@ -152,6 +154,8 @@ const schema = [
       )
     }
 
+    <FurtherReading path={path} />
+
     <div class="wrap block">
       <GetStarted />
     </div>
@@ -165,10 +169,28 @@ const schema = [
     padding-top: clamp(40px, 7vw, 88px);
   }
   .head.with-phone {
-    grid-template-columns: minmax(0, 1fr) 280px;
+    position: relative;
+    grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
     align-items: center;
   }
+  /* The phone stands in a soft pool of the brand's blue, centred in its half, so the header has no dead middle. */
+  .head.with-phone::after {
+    content: "";
+    position: absolute;
+    right: 0;
+    top: 10%;
+    width: 50%;
+    height: 90%;
+    z-index: -1;
+    pointer-events: none;
+    background: radial-gradient(50% 50% at 50% 45%, rgb(0 147 231 / 0.16), transparent 70%);
+  }
   .crumbs a {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    min-height: 40px;
+    margin-left: -4px;
     color: var(--muted-foreground);
     font-size: 0.9375rem;
     font-weight: 500;
@@ -176,6 +198,10 @@ const schema = [
   }
   .crumbs a:hover {
     color: var(--foreground);
+  }
+  .crumbs :global(.crumb-icon) {
+    width: 16px;
+    height: 16px;
   }
   h1 {
     margin-top: 12px;
@@ -196,19 +222,19 @@ const schema = [
   }
   /* The top of the phone is enough to place the screen; the rest fades out so the header stays compact. */
   .head :global(.phone-shot) {
-    width: 280px;
+    justify-self: center;
+    width: 320px;
     aspect-ratio: 466 / 700;
-    object-fit: cover;
-    object-position: top;
+    overflow: hidden;
     mask-image: linear-gradient(180deg, #000 72%, transparent);
   }
-  .laptop {
+  .laptop-wrap {
     margin-top: 56px;
   }
   .body {
     margin-top: clamp(56px, 7vw, 96px);
   }
-  .laptop + .body {
+  .laptop-wrap + .body {
     margin-top: 80px;
   }
   .part {

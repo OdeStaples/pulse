@@ -61,14 +61,19 @@ export const DATA_TYPES = {
   "active-minutes": rollup,
   "active-energy-burned": rollup,
   "sedentary-period": rollup,
-  "hydration-log": rollup,
-  "nutrition-log": rollup,
+  // dailyRollUp for the day's totals (every app); list for each entry, for Journal › Log (src/server/log.ts importEntries).
+  // Only civil start time filters these: start_time, end_time and civil_end_time answer INVALID_DATA_POINT_FILTER
+  // (checked on a real account, 2026-10-09).
+  "hydration-log": { ...rollup, member: "interval.civil_start_time" },
+  "nutrition-log": { ...rollup, member: "interval.civil_start_time" },
   "blood-glucose": rollup,
   "core-body-temperature": rollup,
   "swim-lengths-data": rollup,
   // Heart-rhythm records and height: rare points, listed by time.
-  electrocardiogram: { member: "interval.start_time", maxDays: 90, pageSize: 25, dailyRollUp: false },
-  "irregular-rhythm-notification": { member: "interval.start_time", maxDays: 90, pageSize: 25, dailyRollUp: false },
+  // ECG filters on start time with `>=` only (buildFilter), so one window covers the whole range.
+  electrocardiogram: { member: "interval.start_time", maxDays: 3650, pageSize: 25, dailyRollUp: false },
+  // Sessions other than sleep and ECG filter on civil start time.
+  "irregular-rhythm-notification": { member: "interval.civil_start_time", maxDays: 90, pageSize: 25, dailyRollUp: false },
   height: sample,
 } as const satisfies Record<string, DataType>;
 

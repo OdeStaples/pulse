@@ -2,10 +2,11 @@
 
 import Link from "next/link"
 import { usePathname, useRouter } from "next/navigation"
-import { CloudDownload, Plug, TriangleAlert, Unplug, UserX, Watch } from "lucide-react"
+import { CloudDownload, Plug, TriangleAlert, Unplug, UserX, Watch, WifiOff } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { ago, clock } from "@/lib/format"
 import { useNow } from "@/hooks/use-now"
+import { useOnline } from "@/hooks/use-online"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { CARD_MATERIAL } from "@/components/ui/card"
@@ -14,22 +15,24 @@ import { useShellStatus } from "@/components/shells/ShellStatus"
 
 /**
  * The one place the app talks about its data connection (spec §5.13). Reads ShellStatus; hidden when
- * connected and always hidden in demo mode. Its action row breaks at 768 px (a shell element).
+ * connected and in demo mode, except offline, which it always says: the screen may be this device's last copy
+ * (public/sw.js). Its action row breaks at 768 px (a shell element).
  */
 export function ConnectionBanner({ className }: { className?: string }) {
   const s = useShellStatus()
   const router = useRouter()
   const now = useNow()
   const pathname = usePathname()
-  if (s.mode === "demo" || s.connection === "connected") return null
+  const state = useOnline() ? s.connection : "offline"
+  if (state === "connected" || (s.mode === "demo" && state !== "offline")) return null
   // Settings' Data source card already explains it, with the fix next to it.
-  if ((s.connection === "not_linked" || s.connection === "no_device") && pathname === "/settings") return null
+  if ((state === "not_linked" || state === "no_device") && pathname === "/settings") return null
 
   const total = s.importProgress?.total ?? 180
   const done = s.importProgress?.done ?? 0
   const connect = (label: string) => (
     <Button asChild size="touch" variant="default">
-      <Link href="/oauth/start">{label}</Link>
+      <a href="/oauth/start">{label}</a>
     </Button>
   )
 
@@ -42,29 +45,29 @@ export function ConnectionBanner({ className }: { className?: string }) {
       role: "status",
     },
     not_linked: {
-      icon: <UserX className="text-warning" />,
+      icon: <UserX className="text-warning-text" />,
       title: "No Google Health on this account",
       body: "This Google account has no Google Health profile, so there is nothing to sync. Settings has the fix.",
       action: (
         <Button asChild size="touch" variant="secondary">
-          <Link href="/settings#source">Open Settings</Link>
+          <Link href="/settings?s=source">Open Settings</Link>
         </Button>
       ),
       role: "alert",
     },
     no_device: {
-      icon: <Watch className="text-warning" />,
+      icon: <Watch className="text-warning-text" />,
       title: "No Fitbit device on this account",
       body: "This Google account has Google Health but no Fitbit device. Pair your Fitbit Air in the Google Health app, or sign in with the account it uses.",
       action: (
         <Button asChild size="touch" variant="secondary">
-          <Link href="/settings#source">Open Settings</Link>
+          <Link href="/settings?s=source">Open Settings</Link>
         </Button>
       ),
       role: "alert",
     },
     importing: {
-      icon: <CloudDownload className="text-coach" />,
+      icon: <CloudDownload className="text-coach-text" />,
       title: "Importing history…",
       body: `${done} of ${total}\u00a0days. Scores fill in as days arrive.`,
       action: null,
@@ -78,7 +81,7 @@ export function ConnectionBanner({ className }: { className?: string }) {
       role: "alert",
     },
     stale: {
-      icon: <TriangleAlert className="text-warning" />,
+      icon: <TriangleAlert className="text-warning-text" />,
       title: "Sync is behind",
       body: !s.sync.lastSuccessAt
         ? "Sync is behind. Data may be out of date."
@@ -92,7 +95,14 @@ export function ConnectionBanner({ className }: { className?: string }) {
       ),
       role: "status",
     },
-  }[s.connection]
+    offline: {
+      icon: <WifiOff className="text-foreground-secondary" />,
+      title: "You’re offline",
+      body: `${s.sync.lastSuccessAt ? `Last synced ${now ? ago(s.sync.lastSuccessAt, now) : `at ${clock(s.sync.lastSuccessAt, s.timeZone)}`}. ` : ""}This is what the device last loaded. Check-in answers are kept and sent when you’re back.`,
+      action: null,
+      role: "status",
+    },
+  }[state]
 
   return (
     <Alert
@@ -100,7 +110,7 @@ export function ConnectionBanner({ className }: { className?: string }) {
       aria-live={view.role === "status" ? "polite" : undefined}
       className={cn(
         CARD_MATERIAL,
-        "grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-0.5 border-0 px-4 py-3 *:[svg]:size-5 *:[svg]:translate-y-px *:[svg]:stroke-[1.75] md:grid-cols-[auto_minmax(0,1fr)_auto]",
+        "grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-0.5 border-0 px-4 py-3 *:[svg]:size-5! *:[svg]:translate-y-px *:[svg]:stroke-[1.75] md:grid-cols-[auto_minmax(0,1fr)_auto]",
         className
       )}
     >

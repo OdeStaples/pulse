@@ -3,17 +3,26 @@
 import * as React from "react"
 import Link from "next/link"
 import { usePathname, useSearchParams } from "next/navigation"
-import { HeartPulse, House, Menu, NotebookPen, Settings, type LucideIcon } from "lucide-react"
+import { createLucideIcon, HeartPulse, Menu, NotebookPen, Settings, type LucideIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Mark } from "@/components/brand/Mark"
 import { Wordmark } from "@/components/brand/Wordmark"
 import { dayLabel } from "@/lib/format"
-import { dayHref, parseDay, tabForPath, TAB_ROOT, type Tab } from "@/lib/url"
-import { useShellCalendar } from "./ShellStatus"
-import { DemoChip, SyncStatus } from "./TopBar"
+import { haptic } from "@/lib/haptics"
+import { parseDay, tabForPath, TAB_ROOT, type Tab } from "@/lib/url"
+import { SheetTrigger } from "./SheetTrigger"
+import { useTabNavigate } from "./AppNavigation"
+import { useShellCalendar, useShellStatus } from "./ShellStatus"
+import { DemoChip } from "./TopBar"
+
+/** The reference app's Home glyph: a house outline framing a rising line chart (home-01). Lucide's house, door swapped for a chart. */
+const HomeChart = createLucideIcon("home-chart", [
+  ["path", { d: "M3 10a2 2 0 0 1 .709-1.528l7-5.999a2 2 0 0 1 2.582 0l7 5.999A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z", key: "frame" }],
+  ["path", { d: "m7 16 3-3 2.5 2.5L17 11", key: "chart" }],
+])
 
 const TABS: { tab: Tab; label: string; icon: LucideIcon }[] = [
-  { tab: "home", label: "Home", icon: House },
+  { tab: "home", label: "Home", icon: HomeChart },
   { tab: "health", label: "Health", icon: HeartPulse },
   { tab: "journal", label: "Journal", icon: NotebookPen },
   { tab: "more", label: "More", icon: Menu },
@@ -39,7 +48,7 @@ function Lens({ index, axis, className }: { index: number; axis: "x" | "y"; clas
       aria-hidden
       style={{ "--tab": index } as React.CSSProperties}
       className={cn(
-        "pointer-events-none absolute bg-radial-[ellipse_at_50%_115%] from-white/16 via-white/5 via-55% to-white/[0.02] transition-[translate,opacity] duration-150 ease-standard motion-reduce:transition-none",
+        "pointer-events-none absolute bg-radial-[ellipse_at_50%_115%] from-foreground/16 via-foreground/5 via-55% to-foreground/[0.02] transition-[translate,opacity] duration-150 ease-standard motion-reduce:transition-none",
         axis === "x" ? "translate-x-[calc(var(--tab)*100%)]" : "translate-y-[calc(var(--tab)*(100%+4px))]",
         index < 0 && "opacity-0",
         className
@@ -50,14 +59,17 @@ function Lens({ index, axis, className }: { index: number; axis: "x" | "y"; clas
 
 /** Phone tab bar: a 62 px glass squircle with four destinations (spec §4.2, G1). */
 function TabBar({ current }: { current: number }) {
+  const go = useTabNavigate()
   return (
-    <nav aria-label="Primary" className={cn(GLASS, "relative h-[62px] min-w-0 flex-1 rounded-[22px] p-1")}>
+    <nav aria-label="Primary" onClick={() => haptic(6)} className={cn(GLASS, "relative h-[62px] min-w-0 flex-1 rounded-[22px] p-1")}>
       <Lens index={current} axis="x" className="inset-y-1 left-1 w-[calc((100%-8px)/4)] rounded-[18px]" />
       <ul className="relative grid h-full grid-cols-4">
         {TABS.map(({ tab, label, icon: Icon }, i) => (
           <li key={tab} className="min-w-0">
             <Link
               href={TAB_ROOT[tab]}
+              onClick={(e) => go(TAB_ROOT[tab], e)}
+              prefetch // full prefetch: the tabs open from the client cache, no skeleton flash
               aria-current={i === current ? "page" : undefined}
               className={cn(PRESS, ITEM_TONE(i === current), "flex h-full flex-col items-center justify-center gap-0.5 rounded-[18px] focus-visible:ring-inset")}
             >
@@ -72,13 +84,14 @@ function TabBar({ current }: { current: number }) {
 }
 
 /** Tablet rail, 88 px, floating (inferred, I2): the tab bar turned on its side. */
-function Rail({ current }: { current: number }) {
+function Rail({ current, wide, pathname }: { current: number; wide: boolean; pathname: string }) {
+  const go = useTabNavigate()
   return (
-    <nav aria-label="Primary" className={cn(GLASS, "fixed inset-y-3 left-3 z-30 hidden w-[88px] flex-col items-center rounded-[28px] py-4 md:flex xl:hidden")}>
+    <nav aria-label="Primary" className={cn(GLASS, "fixed top-[calc(var(--inset-top)+12px)] bottom-3 left-3 z-30 hidden w-[88px] flex-col items-center rounded-[28px] py-4 md:flex", !wide && "xl:hidden")}>
       <Link
         href="/"
         aria-label="Pulse home"
-        className="mb-5 grid size-10 place-items-center rounded-full transition-[background-color,scale] duration-150 ease-standard outline-none hover:bg-white/8 focus-visible:ring-3 focus-visible:ring-ring/50 active:scale-[0.96]"
+        className="mb-5 grid size-10 place-items-center rounded-full transition-[background-color,scale] duration-150 ease-standard outline-none hover:bg-foreground/8 focus-visible:ring-3 focus-visible:ring-ring/50 active:scale-[0.96]"
       >
         <span aria-hidden>
           <Mark className="size-6" />
@@ -90,6 +103,8 @@ function Rail({ current }: { current: number }) {
           <li key={tab} className="relative">
             <Link
               href={TAB_ROOT[tab]}
+              onClick={(e) => go(TAB_ROOT[tab], e)}
+              prefetch // full prefetch: the tabs open from the client cache, no skeleton flash
               aria-current={i === current ? "page" : undefined}
               className={cn(PRESS, ITEM_TONE(i === current), "flex h-16 w-[72px] flex-col items-center justify-center gap-1 rounded-[20px]")}
             >
@@ -99,11 +114,26 @@ function Rail({ current }: { current: number }) {
           </li>
         ))}
       </ul>
+      {/* The full sidebar carries Settings; where the rail stands alone (the coach, Settings) it keeps its own. */}
+      {wide && (
+        <>
+          <div aria-hidden className="my-2 h-px w-12 bg-foreground/8" />
+          <Link
+            href="/settings"
+            onClick={(e) => go("/settings", e)}
+            prefetch
+            aria-current={pathname.startsWith("/settings") ? "page" : undefined}
+            className={cn(PRESS, ITEM_TONE(pathname.startsWith("/settings")), "flex h-16 w-[72px] flex-col items-center justify-center gap-1 rounded-[20px]", pathname.startsWith("/settings") && "bg-glass-lens")}
+          >
+            <Settings aria-hidden strokeWidth={1.6} className="size-[26px]" />
+            <span className="text-xs leading-4 font-semibold">Settings</span>
+          </Link>
+        </>
+      )}
       <div className="mt-auto flex flex-col items-center gap-3">
         <React.Suspense>
           <CheckInAction variant="rail" />
         </React.Suspense>
-        <SyncStatus variant="icon" />
       </div>
     </nav>
   )
@@ -115,10 +145,13 @@ function Sidebar({ current, pathname }: { current: number; pathname: string }) {
   const extra = [{ href: "/settings", match: "/settings", label: "Settings", icon: Settings }]
   const extraActive = extra.some((e) => pathname.startsWith(e.match))
   const tab = extraActive ? -1 : current
+  const go = useTabNavigate()
   const item = (href: string, label: string, Icon: LucideIcon, active: boolean, lit = false) => (
     <li key={label} className="relative">
       <Link
         href={href}
+        onClick={(e) => go(href, e)}
+        prefetch
         aria-current={active ? "page" : undefined}
         className={cn(PRESS, ITEM_TONE(active), "flex h-12 items-center gap-3 rounded-full px-4 text-[15px] leading-5 font-semibold", lit && "bg-glass-lens")}
       >
@@ -128,7 +161,7 @@ function Sidebar({ current, pathname }: { current: number; pathname: string }) {
     </li>
   )
   return (
-    <nav aria-label="Primary" className={cn(GLASS, "fixed inset-y-3 left-3 z-30 hidden w-[232px] flex-col rounded-[28px] p-3 xl:flex")}>
+    <nav aria-label="Primary" className={cn(GLASS, "fixed top-[calc(var(--inset-top)+12px)] bottom-3 left-3 z-30 hidden w-[232px] flex-col rounded-[28px] p-3 xl:flex")}>
       <Link
         href="/"
         aria-label="Pulse home"
@@ -143,17 +176,14 @@ function Sidebar({ current, pathname }: { current: number; pathname: string }) {
         <Lens index={tab} axis="y" className="inset-x-0 top-0 h-12 rounded-full" />
         {TABS.map((t, i) => item(TAB_ROOT[t.tab], t.label, t.icon, i === tab))}
       </ul>
-      <div aria-hidden className="mx-3 my-2 h-px bg-white/8" />
+      <div aria-hidden className="mx-3 my-2 h-px bg-foreground/8" />
       <ul className="flex flex-col gap-1">{extra.map((e) => item(e.href, e.label, e.icon, pathname.startsWith(e.match), pathname.startsWith(e.match)))}</ul>
       <div className="mt-auto space-y-3">
         <React.Suspense>
           <CheckInAction variant="sidebar" />
         </React.Suspense>
-        <div className="space-y-1">
-          <div className="px-3">
-            <DemoChip />
-          </div>
-          <SyncStatus variant="line" />
+        <div className="px-3">
+          <DemoChip />
         </div>
       </div>
     </nav>
@@ -176,26 +206,40 @@ function Monogram() {
 
 /**
  * The "Check in" action (spec §4.2.1), the reference app's coach button: indigo-rimmed glass with the "P" monogram. Opens the
- * journal check-in for the day on screen through `?checkin=1`. `float`: the round button over the content (phone).
+ * check-in for the day on screen over the screen itself through `?checkin=1` (spec §11 UX2). `float`: the round button over the content (phone).
  * `rail` and `sidebar`: the same action docked in the tablet rail and laptop sidebar, where floating over the content
  * column hid its right-hand controls (U18 G-02, D-L5).
  */
 function CheckInAction({ variant }: { variant: "float" | "rail" | "sidebar" }) {
   const { today } = useShellCalendar()
+  const { coach } = useShellStatus()
   const params = useSearchParams()
   const { d } = parseDay(params.get("d") ?? undefined, today)
-  const href = `${dayHref("/journal", d, today)}${d === today ? "?" : "&"}checkin=1`
   const label = `Check in for ${dayLabel(d, today)}`
-  if (variant === "sidebar")
+  // With coach access the same button opens the coach (spec §11 V6), as the reference app's opens its assistant;
+  // the check-in moves to the coach's first chip and the Journal tab.
+  if (coach) {
+    const face =
+      variant === "sidebar"
+        ? "flex h-12 items-center gap-3 rounded-full pr-4 pl-2.5 text-[15px] leading-5 font-semibold"
+        : cn("grid shrink-0 place-items-center", variant === "rail" ? "size-14 rounded-[20px]" : "size-[62px] rounded-[22px] shadow-glass backdrop-blur-md backdrop-saturate-150")
     return (
-      <Link href={href} aria-label={label} className={cn(ACTION_FACE, "flex h-12 items-center gap-3 rounded-full pr-4 pl-2.5 text-[15px] leading-5 font-semibold")}>
+      <Link href="/coach" aria-label="Open Coach" className={cn(ACTION_FACE, face)}>
         <Monogram />
-        Check in
+        {variant === "sidebar" && "Coach"}
       </Link>
     )
+  }
+  if (variant === "sidebar")
+    return (
+      <SheetTrigger sheet="checkin" aria-label={label} className={cn(ACTION_FACE, "flex h-12 items-center gap-3 rounded-full pr-4 pl-2.5 text-[15px] leading-5 font-semibold")}>
+        <Monogram />
+        Check in
+      </SheetTrigger>
+    )
   return (
-    <Link
-      href={href}
+    <SheetTrigger
+      sheet="checkin"
       aria-label={label}
       className={cn(
         ACTION_FACE,
@@ -204,7 +248,7 @@ function CheckInAction({ variant }: { variant: "float" | "rail" | "sidebar" }) {
       )}
     >
       <Monogram />
-    </Link>
+    </SheetTrigger>
   )
 }
 
@@ -217,17 +261,21 @@ export function AppNav() {
   const pathname = usePathname()
   const index = TABS.findIndex((t) => t.tab === tabForPath(pathname))
   const root = ROOTS.has(pathname)
+  // The coach and Settings keep the rail on laptop too: their own panel sits beside it, and two full sidebars read as one too many.
+  const railOnly = pathname === "/coach" || pathname === "/settings"
   return (
     <>
-      <Rail current={index} />
-      <Sidebar current={index} pathname={pathname} />
-      <div className="pointer-events-none fixed inset-x-3 bottom-[max(calc(env(safe-area-inset-bottom)-6px),12px)] z-30 flex touch-manipulation justify-end gap-2 *:pointer-events-auto md:hidden">
+      {/* No tab is current on the coach (tabForPath files it under Home); the Coach button is where you are. */}
+      <Rail current={pathname.startsWith("/coach") || pathname.startsWith("/settings") ? -1 : index} wide={railOnly} pathname={pathname} />
+      {!railOnly && <Sidebar current={index} pathname={pathname} />}
+      <div className="pointer-events-none fixed inset-x-3 bottom-[max(calc(env(safe-area-inset-bottom)-6px),12px)] z-30 flex touch-manipulation justify-end gap-2 *:pointer-events-auto md:hidden" data-tabbar>
         {root && (
           <div className="flex min-w-0 flex-1">
             <TabBar current={index} />
           </div>
         )}
-        {!pathname.startsWith("/settings") && (
+        {/* Not on Settings, nor on the coach, whose composer sits where the button would. */}
+        {!pathname.startsWith("/settings") && !pathname.startsWith("/coach") && (
           <React.Suspense>
             <CheckInAction variant="float" />
           </React.Suspense>

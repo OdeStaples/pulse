@@ -5,7 +5,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { ChevronLeft, ChevronRight, LoaderCircle } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { calendarContext, type CalendarContext } from "@/lib/calendar"
-import { dayLabel, rangeLabel } from "@/lib/format"
+import { pillLabel, rangeLabel } from "@/lib/format"
 import { dayHref, parseDay, stepDay, weekOf } from "@/lib/url"
 import { Dialog, DialogTrigger } from "@/components/ui/dialog"
 import { CalendarPanel } from "./CalendarPanel"
@@ -22,6 +22,11 @@ export type DateSwitcherProps = {
   placement?: "header" | "body"
   /** Home's top row: below 400 px the pill tightens (24 px chevrons, snug label) so the row fits at 320 px. */
   narrow?: boolean
+  /**
+   * false: the label alone, no chevrons (the score screens' "TODAY", spec §11 R33). The label still opens the calendar
+   * and the arrow keys still step days.
+   */
+  steppers?: boolean
 }
 
 const PRESS = "transition-[background-color,color,scale] duration-150 ease-standard outline-none focus-visible:ring-3 focus-visible:ring-ring/50 active:scale-[0.96]"
@@ -52,7 +57,7 @@ function ownsArrows(target: EventTarget | null) {
 const NARROW_STEP = "max-[400px]:size-6"
 const NARROW_LABEL = "max-[400px]:min-w-0 max-[400px]:px-2.5"
 
-function Switcher({ mode, calendar, placement = "body", narrow = false }: DateSwitcherProps) {
+function Switcher({ mode, calendar, placement = "body", narrow = false, steppers = true }: DateSwitcherProps) {
   const { today, firstDay } = useShellCalendar()
   const router = useRouter()
   const pathname = usePathname()
@@ -109,7 +114,7 @@ function Switcher({ mode, calendar, placement = "body", narrow = false }: DateSw
     return () => window.removeEventListener("keydown", onKey)
   }, [step, atStart, atEnd, by])
 
-  const label = week ? rangeLabel(weekStart, weekEnd) : dayLabel(d, today)
+  const label = week ? rangeLabel(weekStart, weekEnd) : pillLabel(d, today)
   const bare = placement === "header"
   const text = loading ? (
     <LoaderCircle aria-hidden className="mx-auto size-4 animate-spin motion-reduce:animate-none" strokeWidth={2} />
@@ -122,10 +127,12 @@ function Switcher({ mode, calendar, placement = "body", narrow = false }: DateSw
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <div className={cn("inline-flex items-center", bare ? "gap-1" : "h-[30px] rounded-full bg-white/[0.04] p-px")}>
-        <button type="button" className={bare ? BARE_STEP : cn(STEP, narrow && NARROW_STEP)} aria-label={`Previous ${unit}`} disabled={atStart} onClick={() => by(-step)}>
-          <ChevronLeft aria-hidden className={bare ? "size-4" : "size-[18px]"} strokeWidth={2.25} />
-        </button>
+      <div className={cn("inline-flex items-center", bare ? "gap-1" : "h-[30px] rounded-full bg-foreground/[0.04] p-px")}>
+        {steppers && (
+          <button type="button" className={bare ? BARE_STEP : cn(STEP, narrow && NARROW_STEP)} aria-label={`Previous ${unit}`} disabled={atStart} onClick={() => by(-step)}>
+            <ChevronLeft aria-hidden className={bare ? "size-4" : "size-[18px]"} strokeWidth={2.25} />
+          </button>
+        )}
         <DialogTrigger asChild>
           <button
             type="button"
@@ -135,15 +142,17 @@ function Switcher({ mode, calendar, placement = "body", narrow = false }: DateSw
               PRESS,
               bare
                 ? "relative h-9 min-w-28 rounded-full px-2 text-center after:absolute after:inset-x-0 after:-inset-y-1 text-xs leading-4 font-bold tracking-[0.1em] whitespace-nowrap uppercase tabular-nums hover:text-foreground-secondary"
-                : cn(LABEL, "relative h-7 min-w-24 rounded-full bg-white/[0.08] px-4 text-center after:absolute after:inset-x-0 after:-inset-y-2 hover:bg-white/[0.12]", narrow && NARROW_LABEL)
+                : cn(LABEL, "relative h-7 min-w-24 rounded-full bg-foreground/[0.08] px-4 text-center after:absolute after:inset-x-0 after:-inset-y-2 hover:bg-foreground/[0.12]", narrow && NARROW_LABEL)
             )}
           >
             {text}
           </button>
         </DialogTrigger>
-        <button type="button" className={bare ? BARE_STEP : cn(STEP, narrow && NARROW_STEP)} aria-label={`Next ${unit}`} disabled={atEnd} onClick={() => by(step)}>
-          <ChevronRight aria-hidden className={bare ? "size-4" : "size-[18px]"} strokeWidth={2.25} />
-        </button>
+        {steppers && (
+          <button type="button" className={bare ? BARE_STEP : cn(STEP, narrow && NARROW_STEP)} aria-label={`Next ${unit}`} disabled={atEnd} onClick={() => by(step)}>
+            <ChevronRight aria-hidden className={bare ? "size-4" : "size-[18px]"} strokeWidth={2.25} />
+          </button>
+        )}
       </div>
       <CalendarPanel
         selected={d}
@@ -160,7 +169,7 @@ function Switcher({ mode, calendar, placement = "body", narrow = false }: DateSw
 /** the reference app's date pill (spec §4.3). Reads `?d=`; changes it with router.replace. */
 export function DateSwitcher(props: DateSwitcherProps) {
   return (
-    <React.Suspense fallback={<div aria-hidden className={cn(props.placement === "header" ? "h-9 w-44" : "h-[30px] w-40 rounded-full bg-white/[0.04]", props.narrow && "max-[400px]:w-32")} />}>
+    <React.Suspense fallback={<div aria-hidden className={cn(props.placement === "header" ? "h-9 w-44" : "h-[30px] w-40 rounded-full bg-foreground/[0.04]", props.narrow && "max-[400px]:w-32")} />}>
       <Switcher {...props} />
     </React.Suspense>
   )

@@ -31,10 +31,10 @@ function Stat({ stat }: { stat?: HeaderStat }) {
   if (!stat) return <span />
   return (
     <p className={cn("flex min-w-0 flex-col items-center gap-0.5 text-center", STAT_MOTION)}>
-      <span className={cn("font-numeric text-xl leading-6 font-bold tabular-nums", stat.tone === "optimal" ? "text-optimal" : stat.tone === "warning" ? "text-warning" : "text-foreground")}>
+      <span className={cn("font-numeric text-xl leading-6 font-bold tabular-nums", stat.tone === "optimal" ? "text-optimal-text" : stat.tone === "warning" ? "text-warning-text" : "text-foreground")}>
         {stat.value}
       </span>
-      <span className="text-xs leading-4 font-bold tracking-[0.08em] text-balance text-muted-foreground uppercase">{stat.label}</span>
+      <span className="text-xs leading-4 font-bold tracking-[0.1em] text-balance text-muted-foreground uppercase">{stat.label}</span>
     </p>
   )
 }
@@ -54,7 +54,7 @@ export function CollapsingHeader({ compact, stats, ...row }: DetailHeaderProps &
   useHeroCollapse(headerRef, heroRef)
 
   return (
-    <header ref={headerRef} data-state="top" className="group/ch pointer-events-none sticky top-0 z-20 pt-[env(safe-area-inset-top)] pb-6">
+    <header ref={headerRef} data-state="top" className="group/ch pointer-events-none sticky top-0 z-20 pt-[var(--inset-top)] pb-6">
       {/* The page ground with the 24 px fade: row 1 at rest, rows 1 and 2 once collapsed. */}
       <div
         aria-hidden

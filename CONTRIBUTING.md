@@ -50,12 +50,13 @@ that passes CI and gets a review, and it lands as one squashed commit.
 
    ```sh
    pnpm typecheck && pnpm lint && pnpm test
-   pnpm e2e   # for UI changes; it runs its own servers on :3300 and :3301
+   pnpm e2e   # for UI changes; needs `docker compose -f compose.dev.yaml up -d`, runs its own servers on :3300 and :3301
    ```
 
    While iterating, `pnpm vitest related <file>` or `pnpm vitest --changed main` runs only the tests your
-   change can reach. The seeded 180-day test database is built once per run and cached in
-   `node_modules/.cache/pulse-test` until a source file changes.
+   change can reach. Unit tests need no Docker: they run on PGlite (Postgres in
+   process). The seeded 180-day test database is built once per run and cached in `node_modules/.cache/pulse-test`
+   until a source file changes.
 
 4. Open a pull request and fill in the template. CI must be green.
 
@@ -67,10 +68,13 @@ that passes CI and gets a review, and it lands as one squashed commit.
   made-up number.
 - **Causality.** A day's scores depend only on that day and earlier days.
 - **UI from the kit.** Screens are built from the shells and kit components with the design tokens in
-  `src/app/globals.css`; no new CSS files. Check every UI change at 361 px (a phone) and 1440 px (a laptop).
-  The UI contract is [docs/design/spec.md](docs/design/spec.md).
-- **Tests beside the code.** Algorithms get golden-value or property tests; queries get tests on a temporary
-  database (`src/server/testing.ts`).
+  `src/app/globals.css`; no new CSS files. Check every UI change at 361 px (a phone) and 1440 px (a laptop),
+  in a browser, before you open the pull request: a layout read from the code is a guess. Check touch too (tap,
+  drag, scroll) where the change has it. The UI contract is [docs/design/spec.md](docs/design/spec.md).
+- **App icons and launch screens are generated.** Edit their sources and run `pnpm pwa:assets`; never edit the
+  PNGs in `public/icons` or `public/splash` by hand ([docs/pwa.md](docs/pwa.md#rebrand-it-for-your-fork)).
+- **Tests beside the code.** Algorithms get golden-value or property tests; queries get tests on an in-process
+  Postgres (`src/server/testing.ts`). Every query is scoped to a user; extend `queries/isolation.test.ts` for new screens.
 - **Database changes** go through `pnpm db:generate`; migrations run at boot.
 
 ## Privacy and assets

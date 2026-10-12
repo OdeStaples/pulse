@@ -4,11 +4,10 @@ import { ChevronLeft, ChevronRight } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { DataColor } from "@/lib/bands"
 import { DAY, formatDay, formatValue, rangeLabel, type FormatKey } from "@/lib/format"
-import { dayHref, todayIn } from "@/lib/url"
-import { getConfig } from "@/server/config"
+import { dayHref } from "@/lib/url"
 import { getReport } from "@/server/queries/reports"
 import { latestReport } from "@/server/queries/home"
-import { defaultCtx } from "@/server/queries/common"
+import { todayOf, userCtx } from "@/server/queries/common"
 import type { KeyStat, ReportVM } from "@/server/queries/types"
 import { ZoneBars } from "@/components/charts/ZoneBars"
 import { DriverList } from "@/components/metrics/DriverList"
@@ -25,7 +24,7 @@ const MONTH = /^\d{4}-\d{2}$/
 const STEP =
   "relative grid size-9 place-items-center rounded-full text-foreground transition-[background-color,scale] duration-150 ease-standard outline-none after:absolute after:-inset-1 hover:bg-accent focus-visible:ring-3 focus-visible:ring-ring/50 active:scale-[0.96] aria-disabled:pointer-events-none aria-disabled:opacity-40"
 const SEGMENT =
-  "inline-flex h-10 min-w-11 items-center justify-center rounded-md px-3 text-[13px] font-bold tracking-[0.06em] uppercase transition-[background-color,color] duration-150 ease-standard outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+  "inline-flex h-10 min-w-11 items-center justify-center rounded-md px-3 text-[13px] font-bold tracking-[0.1em] uppercase transition-[background-color,color] duration-150 ease-standard outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
 
 export async function generateMetadata({ params }: PageProps<"/reports/[period]">) {
   const { period } = await params
@@ -42,7 +41,7 @@ const FORMAT: Record<string, { format: FormatKey; unit?: string; scale?: number 
   rhr: { format: "int", unit: "bpm" },
 }
 const DIAL_FORMAT = { sleep: "int", recovery: "int", strain: "decimal1" } as const
-const BALANCE_TONE = { balanced: "text-optimal", overreaching: "text-warning", undertrained: "text-muted-foreground" }
+const BALANCE_TONE = { balanced: "text-optimal-text", overreaching: "text-warning-text", undertrained: "text-muted-foreground" }
 
 function periodLabel(kind: "week" | "month", start: string, end: string) {
   return kind === "week" ? rangeLabel(start, end) : formatDay(start, DAY.monthYear)
@@ -102,7 +101,7 @@ function Dials({ vm }: { vm: ReportVM }) {
     <div className="flex w-full items-start justify-center gap-5 sm:gap-8">
       {vm.dials.map((dl) => {
         const f = DIAL_FORMAT[dl.key]
-        const tone = dl.delta === null || dl.key === "strain" || Math.round(dl.delta * 10) === 0 ? "text-muted-foreground" : dl.delta > 0 ? "text-optimal" : "text-warning"
+        const tone = dl.delta === null || dl.key === "strain" || Math.round(dl.delta * 10) === 0 ? "text-muted-foreground" : dl.delta > 0 ? "text-optimal-text" : "text-warning-text"
         return (
           <div key={dl.key} className="flex min-w-0 flex-1 basis-0 flex-col items-center gap-1.5 text-center">
             <ScoreDial variant={dl.key} size="md" value={dl.metric.value} reason={dl.metric.reason} label={dl.label} />
@@ -147,13 +146,13 @@ export default async function ReportPage({ params }: PageProps<"/reports/[period
   const { period } = await params
   const isWeek = WEEK.test(period)
   if (!isWeek && !MONTH.test(period)) notFound()
-  const today = todayIn(getConfig().timeZone)
-  const vm = getReport(period)
+  const ctx = await userCtx()
+  const today = todayOf(ctx)
+  const vm = await getReport(period, ctx)
   const title = isWeek ? "Weekly report" : "Monthly report"
 
   if (!vm) {
-    const ctx = defaultCtx()
-    const latest = latestReport(ctx, isWeek ? "week" : "month")
+    const latest = await latestReport(ctx, isWeek ? "week" : "month")
     return (
       <DetailShell
         title={title}
@@ -228,7 +227,7 @@ export default async function ReportPage({ params }: PageProps<"/reports/[period
                         className="-mx-2 flex min-h-16 items-center gap-3 rounded-lg px-2 py-2 transition-[background-color] duration-150 ease-standard outline-none hover:bg-accent focus-visible:ring-3 focus-visible:ring-ring/50 active:bg-accent"
                       >
                         <span aria-hidden className="min-w-0 flex-1">
-                          <span className="block text-xs leading-4 font-bold tracking-[0.08em] uppercase">{b.label}</span>
+                          <span className="block text-xs leading-4 font-bold tracking-[0.1em] uppercase">{b.label}</span>
                           <span className={cn(CAPTION, "mt-1 block tabular-nums")}>{formatDay(b.day, DAY.short)}</span>
                         </span>
                         <span aria-hidden className="flex items-center gap-4">

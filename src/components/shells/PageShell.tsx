@@ -3,6 +3,7 @@ import { ConnectionBanner } from "@/components/metrics/ConnectionBanner"
 import { COLUMN_WIDTH } from "./column"
 import type { DateSwitcherProps } from "./DateSwitcher"
 import { HomeHeader, type HeaderRings } from "./HomeHeader"
+import { PageEnter } from "./PageEnter"
 import { TitleHeader } from "./TopBar"
 
 /** The content column (spec §2.5, §4.5). */
@@ -26,8 +27,6 @@ export type PageShellProps = {
   slots?: HomeSlots
   /** For `layout="home"`: the day's scores for the collapsing header's ring row (spec §4.3). */
   rings?: HeaderRings
-  /** Page ground (spec §2.1): the Health hub has a teal glow. */
-  ground?: "default" | "health"
   /** A route's loading.tsx: the skeleton is aria-hidden, so this says "Loading…" to screen readers instead. */
   loading?: boolean
   children?: React.ReactNode
@@ -41,11 +40,11 @@ export const LoadingStatus = ({ title }: { title: string }) => (
 )
 
 /** Tab roots: Home, Health, Journal, More (spec §4.5). */
-export function PageShell({ title, dateSwitcher, actions, layout = "stack", slots, rings, ground, loading, children }: PageShellProps) {
+export function PageShell({ title, dateSwitcher, actions, layout = "stack", slots, rings, loading, children }: PageShellProps) {
   return (
-    <div data-ground={ground === "health" ? "health" : undefined}>
+    <div>
       {layout === "home" ? <HomeHeader rings={rings} /> : <TitleHeader title={title} dateSwitcher={dateSwitcher} />}
-      <div className={CONTENT_COLUMN} aria-busy={loading || undefined}>
+      <PageEnter className={CONTENT_COLUMN} aria-busy={loading || undefined}>
         {loading && <LoadingStatus title={title} />}
         {/* Home's top row pulls itself up under the header (-mt-2), so the banner keeps 24 px above the wordmark. */}
         <ConnectionBanner className={layout === "home" ? "mb-8 xl:mb-6" : "mb-4 xl:mb-6"} />
@@ -60,7 +59,7 @@ export function PageShell({ title, dateSwitcher, actions, layout = "stack", slot
         ) : (
           <div className={cn(layout === "grid-2" ? "grid grid-cols-1 gap-3 md:grid-cols-2 xl:gap-4" : "flex flex-col gap-8 xl:gap-10")}>{children}</div>
         )}
-      </div>
+      </PageEnter>
     </div>
   )
 }
