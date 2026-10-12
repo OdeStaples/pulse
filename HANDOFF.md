@@ -25,6 +25,23 @@ The user has no coding experience: explain steps in plain, short language.
 - Also pending: open a pull request `calorie-breakup` -> `main` (CONTRIBUTING.md: `main` is protected), and
   ask what the sleep graph should change.
 
+## 3b. Upstream merge (parked on `merge-upstream`)
+- Plan: connect the Fitbit Air on the current (SQLite) version first. Do the Postgres merge later, only if wanted.
+- `calorie-breakup` stays on the SQLite version at the last pushed state (eda87e8). It was reset to that after the
+  merge; nothing was lost.
+- The merge of `upstream/main` (remote `upstream` = https://github.com/adityaongit/pulse, added locally) is saved on
+  branch `merge-upstream` (8da909c), with the week-stepping work merged in. Conflicts were in the Strain page,
+  `TrendChart`, and the strain queries/types.
+- Upstream removed the Calories card from the Strain page (it now has a Weekly Trends footer with a `calories` view).
+  Week stepping (`weekNav`) still lives in `TrendChart`, with tests, but no page uses it on that branch.
+- Upstream moved Pulse from SQLite to Postgres (`pg`, better-auth; PGlite is for tests only). The merged code needs
+  Postgres 18 on this PC (native, about 300-350 MB, or Docker Desktop) plus `DATA_SOURCE=demo` and
+  `BETTER_AUTH_SECRET` in `.env`. Migrations run at boot; demo data is generated into Postgres on first boot.
+  Nothing has been installed for this (ask first, per CLAUDE.md).
+- On `merge-upstream`: `pnpm lint` and `pnpm typecheck` pass after `pnpm install`. `pnpm test` failures vary
+  between runs on identical code (16, then 25): timeouts under load (30 s limit, runs take 24-29 min).
+  The failing files were not rerun on their own.
+
 ## 4. How to run and test
 - `pnpm dev`, then http://localhost:3000 (demo sign-in; /strain for calories, /sleep for sleep). Health: /healthz
 - `pnpm lint`, `pnpm typecheck` pass. `pnpm test`: 7 tests fail, but they fail on the untouched code too.
